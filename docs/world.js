@@ -39,3 +39,26 @@ export function blocked(x,z,r=.32){if(Math.abs(x)>LIMIT-r||Math.abs(z)>LIMIT-r)r
 export function clearLine(a,b){const d=Math.hypot(a.x-b.x,a.z-b.z),steps=Math.ceil(d*4);for(let i=1;i<steps;i++)if(blocked(a.x+(b.x-a.x)*i/steps,a.z+(b.z-a.z)*i/steps,.02))return false;return true}
 export function spawn(i,seeker=false){return seeker?{x:0,z:12}:{x:-9+(i%6)*3.6,z:12+Math.floor(i/6)*3};}
 
+// Game coordinates for the launcher. The first surface or player stops the shot.
+export const rocketCooldown=2400;
+export const rocketRadius=3.6;
+export function rocketPath(x,z,yaw,pitch,players=[]){
+  const start={x,y:1.82,z};
+  const direction={x:-Math.sin(yaw)*Math.cos(pitch),y:Math.sin(pitch),z:-Math.cos(yaw)*Math.cos(pitch)};
+  const range=23;
+  const end={x:x+direction.x*range,z:z+direction.z*range};
+  const obstacles=boxes.filter(b=>b.h>.12&&b.y+b.h/2>.1
+    &&b.x+b.w/2>=Math.min(x,end.x)&&b.x-b.w/2<=Math.max(x,end.x)
+    &&b.z+b.d/2>=Math.min(z,end.z)&&b.z-b.d/2<=Math.max(z,end.z));
+  for(let distance=.24;distance<=range;distance+=.16){
+    const point={x:x+direction.x*distance,y:start.y+direction.y*distance,z:z+direction.z*distance};
+    if(point.y<.1||Math.abs(point.x)>LIMIT||Math.abs(point.z)>LIMIT
+      ||obstacles.some(b=>Math.abs(point.x-b.x)<b.w/2&&Math.abs(point.y-b.y)<b.h/2&&Math.abs(point.z-b.z)<b.d/2)
+      ||players.some(p=>Math.hypot(point.x-p.x,point.z-p.z)<(props[p.prop]?.r||.37)
+        &&point.y<.1+(props[p.prop]?.h||1.9))){
+      return {start,impact:{x:point.x-direction.x*.17,y:point.y-direction.y*.17,z:point.z-direction.z*.17}};
+    }
+  }
+  return {start,impact:{...end,y:start.y+direction.y*range}};
+}
+

@@ -8,6 +8,13 @@
       "when": 1795232365300,
       "tag": "0000_peaceful_mongu",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1795366151664,
+      "tag": "0001_bright_payback",
+      "breakpoints": true
     }
   ]
 }

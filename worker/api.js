@@ -1,7 +1,7 @@
-import {blocked,clearLine,props,spawn} from '../client/world.js';
+import {blocked,clearLine,props,spawn,rocketPath,rocketCooldown,rocketRadius} from '../client/world.js';
 const json=(data,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store'}});
 const fail=(message,status=400)=>{throw Object.assign(new Error(message),{status})};
-const publicPlayer=p=>({id:p.id,name:p.name,x:p.x,z:p.z,yaw:p.yaw,pitch:p.pitch,prop:p.prop,caught:!!p.caught,light:!!p.light});
+const publicPlayer=p=>({id:p.id,name:p.name,x:p.x,z:p.z,yaw:p.yaw,pitch:p.pitch,prop:p.prop,caught:!!p.caught,light:!!p.light,rocket:p.rocket?JSON.parse(p.rocket):null});
 const pagesOrigin = 'https://aflyingkelp.github.io';
 export async function api(request, env) {
  const origin = request.headers.get('Origin');
@@ -52,7 +52,7 @@ async function roomRequest(request,env){try{
  if(action==='start'){
   if(room.host!==p.id)fail('Only the room host can start.',403);if(roster.length<2)fail('At least two players are needed. Share your room code.');
   const chosen=roster.find(q=>q.id===body.seeker)||roster[room.round%roster.length];
-  await db.batch([sql("UPDATE rooms SET phase='playing',starts=?,seeker=?,round=round+1,winner=NULL WHERE code=?",now,chosen.id,p.room),...roster.map((q,i)=>{const pos=spawn(i,q.id===chosen.id);return sql('UPDATE players SET x=?,z=?,prop=-1,caught=0,light=0,tagged=0 WHERE id=?',pos.x,pos.z,q.id)})]);
+  await db.batch([sql("UPDATE rooms SET phase='playing',starts=?,seeker=?,round=round+1,winner=NULL WHERE code=?",now,chosen.id,p.room),...roster.map((q,i)=>{const pos=spawn(i,q.id===chosen.id);return sql('UPDATE players SET x=?,z=?,prop=-1,caught=0,light=0,tagged=0,rocket=NULL WHERE id=?',pos.x,pos.z,q.id)})]);
   return json({started:true});
  }
  if(action==='morph'){
@@ -62,6 +62,25 @@ async function roomRequest(request,env){try{
   if(Math.hypot(p.x-target.x,p.z-target.z)>5.5||!clearLine(p,target))fail('Get closer to that object.');
   if(blocked(p.x,p.z,target.r))fail('Move away from the wall before transforming.');
   await sql('UPDATE players SET prop=?,light=0 WHERE id=?',id,p.id).run();return json({prop:id});
+ }
+ if(action==='rocket'){
+  if(p.id!==room.seeker||phase!=='seeking')fail('The launcher unlocks after the hiding countdown.',403);
+  const yaw=Number(body.yaw),pitch=Number(body.pitch);
+  if(!Number.isFinite(yaw)||!Number.isFinite(pitch)||Math.abs(pitch)>1.25)fail('Invalid aim.');
+  const fired=await sql('UPDATE players SET tagged=? WHERE id=? AND tagged<=?',now,p.id,now-rocketCooldown).run();
+  if(!(fired.meta?.changes??fired.changes))fail('Launcher recharging.',429);
+  const hiders=roster.filter(q=>q.id!==p.id&&!q.caught);
+  const {start,impact}=rocketPath(p.x,p.z,yaw,pitch,hiders);
+  const hits=hiders.filter(q=>{
+   const height=(props[q.prop]?.h||1.9)*.5;
+   return Math.hypot(q.x-impact.x,height-impact.y,q.z-impact.z)<=rocketRadius&&clearLine(impact,q);
+  });
+  const shot={time:now,start,impact};
+  await db.batch([
+   sql('UPDATE players SET rocket=? WHERE id=?',JSON.stringify(shot),p.id),
+   ...hits.map(q=>sql('UPDATE players SET caught=1,prop=-1,light=0 WHERE id=?',q.id))
+  ]);
+  return json({...shot,hits:hits.map(q=>q.name)});
  }
  if(action==='tag'){
   if(p.id!==room.seeker||phase!=='seeking')fail('Tagging unlocks when the hiding countdown ends.');if(now-p.tagged<900)fail('Wait a moment before searching again.',429);
