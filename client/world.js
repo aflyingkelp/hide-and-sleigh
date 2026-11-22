@@ -42,6 +42,10 @@ export function spawn(i,seeker=false){return seeker?{x:0,z:12}:{x:-9+(i%6)*3.6,z
 // Game coordinates for the launcher. The first surface or player stops the shot.
 export const rocketCooldown=2400;
 export const rocketRadius=3.6;
+export const tauntNames=['He He He Ha','Death Bong','Metal Pipe','WYSI','Scream','Get Back Here','Weird Route','Dance Moves'];
+export const trapBeats=[1400,2480,3360,4620];
+export const trapWindow=230;
+export const trapDuration=5250;
 export function rocketPath(x,z,yaw,pitch,players=[]){
   const start={x,y:1.82,z};
   const direction={x:-Math.sin(yaw)*Math.cos(pitch),y:Math.sin(pitch),z:-Math.cos(yaw)*Math.cos(pitch)};

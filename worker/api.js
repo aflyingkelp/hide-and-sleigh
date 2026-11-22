@@ -1,7 +1,7 @@
-import {blocked,clearLine,props,spawn,rocketPath,rocketCooldown,rocketRadius} from '../client/world.js';
+import {blocked,clearLine,props,spawn,rocketPath,rocketCooldown,rocketRadius,tauntNames,trapBeats,trapWindow,trapDuration} from '../client/world.js';
 const json=(data,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store'}});
 const fail=(message,status=400)=>{throw Object.assign(new Error(message),{status})};
-const publicPlayer=p=>({id:p.id,name:p.name,x:p.x,z:p.z,yaw:p.yaw,pitch:p.pitch,prop:p.prop,caught:!!p.caught,light:!!p.light,rocket:p.rocket?JSON.parse(p.rocket):null});
+const publicPlayer=p=>({id:p.id,name:p.name,x:p.x,z:p.z,yaw:p.yaw,pitch:p.pitch,prop:p.prop,caught:!!p.caught,light:!!p.light,rocket:p.rocket?JSON.parse(p.rocket):null,taunt:p.taunt?JSON.parse(p.taunt):null});
 const pagesOrigin = 'https://aflyingkelp.github.io';
 export async function api(request, env) {
  const origin = request.headers.get('Origin');
@@ -52,8 +52,43 @@ async function roomRequest(request,env){try{
  if(action==='start'){
   if(room.host!==p.id)fail('Only the room host can start.',403);if(roster.length<2)fail('At least two players are needed. Share your room code.');
   const chosen=roster.find(q=>q.id===body.seeker)||roster[room.round%roster.length];
-  await db.batch([sql("UPDATE rooms SET phase='playing',starts=?,seeker=?,round=round+1,winner=NULL WHERE code=?",now,chosen.id,p.room),...roster.map((q,i)=>{const pos=spawn(i,q.id===chosen.id);return sql('UPDATE players SET x=?,z=?,prop=-1,caught=0,light=0,tagged=0,rocket=NULL WHERE id=?',pos.x,pos.z,q.id)})]);
+  await db.batch([sql("UPDATE rooms SET phase='playing',starts=?,seeker=?,round=round+1,winner=NULL WHERE code=?",now,chosen.id,p.room),sql('DELETE FROM traps WHERE room=?',p.room),...roster.map((q,i)=>{const pos=spawn(i,q.id===chosen.id);return sql('UPDATE players SET x=?,z=?,prop=-1,caught=0,light=0,tagged=0,rocket=NULL,taunt=NULL WHERE id=?',pos.x,pos.z,q.id)})]);
   return json({started:true});
+ }
+ if(action==='taunt'){
+  if(p.caught||phase==='ended')fail('Taunts are available while you are playing.',403);
+  const sound=body.sound;
+  if(!Number.isInteger(sound)||!tauntNames[sound])fail('Choose a sound.');
+  const event={sound,time:now,x:p.x,z:p.z};
+  const changed=await sql("UPDATE players SET taunt=? WHERE id=? AND (taunt IS NULL OR json_extract(taunt,'$.time')<=?)",JSON.stringify(event),p.id,now-5000).run();
+  if(!(changed.meta?.changes??changed.changes))fail('Taunt is recharging.',429);
+  return json(event);
+ }
+ if(action==='place-trap'){
+  if(p.id!==room.seeker||phase!=='seeking')fail('Only the hunter can place traps during the hunt.',403);
+  if(blocked(p.x,p.z,.36))fail('Find a clear spot to place the trap.');
+  const result=await sql(`INSERT INTO traps (id,room,round,x,z,placed)
+    SELECT ?,?,?,?,?,? WHERE
+    (SELECT count(*) FROM traps WHERE room=? AND round=? AND victim IS NULL)<5
+    AND NOT EXISTS (SELECT 1 FROM traps WHERE room=? AND round=? AND (placed>? OR (victim IS NULL AND (x-?)*(x-?)+(z-?)*(z-?)<4)))`,
+    crypto.randomUUID(),p.room,room.round,p.x,p.z,now,p.room,room.round,p.room,room.round,now-3500,p.x,p.x,p.z,p.z).run();
+  if(!(result.meta?.changes??result.changes))fail('Move away from other traps, or wait for a slot to free up.');
+  return json({placed:true});
+ }
+ let roomTraps=[];
+ if(phase==='seeking'&&(action==='sync'||action==='trap-result')){
+  await sql("UPDATE traps SET result='fail',resolved=? WHERE room=? AND round=? AND triggered<? AND result IS NULL",now,p.room,room.round,now-trapDuration-750).run();
+  roomTraps=(await sql('SELECT * FROM traps WHERE room=? AND round=? AND (resolved IS NULL OR resolved>?)',p.room,room.round,now-3500).all()).results;
+ }
+ const challenge=roomTraps.find(t=>t.victim===p.id&&!t.result);
+ if(action==='trap-result'){
+  if(!challenge||challenge.id!==body.trap)fail('That trap challenge has ended.',409);
+  const taps=body.taps;
+  const passed=Array.isArray(taps)&&taps.length===trapBeats.length
+    &&taps.every((tap,i)=>Number.isFinite(tap)&&Math.abs(tap-trapBeats[i])<=trapWindow)
+    &&now>=challenge.triggered+trapBeats.at(-1)-trapWindow;
+  await sql('UPDATE traps SET result=?,resolved=? WHERE id=? AND result IS NULL',passed?'pass':'fail',now,challenge.id).run();
+  return json({passed});
  }
  if(action==='morph'){
   if(p.id===room.seeker&&room.phase==='playing')fail('Seekers cannot copy objects.');if(p.caught&&room.phase==='playing')fail('You have been caught. Wait for the next round.');
@@ -91,6 +126,21 @@ async function roomRequest(request,env){try{
  if(action!=='sync')fail('Unknown action',404);
  let x=Number(body.x),z=Number(body.z);const maxStep=Math.min(2,Math.max(.15,(now-p.seen)/1000))*8+1;
  if(!Number.isFinite(x)||!Number.isFinite(z)||Math.hypot(x-p.x,z-p.z)>maxStep||blocked(x,z,p.prop>=0?props[p.prop]?.r||.32:.32)||!clearLine(p,{x,z})||(p.id===room.seeker&&phase==='hiding')){x=p.x;z=p.z}
+ if(challenge){x=p.x;z=p.z}
+ if(phase==='seeking'&&!challenge&&!p.caught&&p.id!==room.seeker){
+  const vx=x-p.x,vz=z-p.z;
+  for(const trap of roomTraps){
+   if(trap.victim)continue;
+   const step=Math.max(0,Math.min(1,((trap.x-p.x)*vx+(trap.z-p.z)*vz)/(vx*vx+vz*vz||1)));
+   if(Math.hypot(p.x+vx*step-trap.x,p.z+vz*step-trap.z)>.68)continue;
+   const triggered=now+400;
+   const result=await sql('UPDATE traps SET victim=?,triggered=? WHERE id=? AND victim IS NULL',p.id,triggered,trap.id).run();
+   if(!(result.meta?.changes??result.changes))continue;
+   x=p.x+vx*step;z=p.z+vz*step;
+   trap.victim=p.id;trap.triggered=triggered;
+   break;
+  }
+ }
  const yaw=Number.isFinite(body.yaw)?body.yaw:0,pitch=Number.isFinite(body.pitch)?Math.max(-1.3,Math.min(1.3,body.pitch)):0;
  await sql('UPDATE players SET x=?,z=?,yaw=?,pitch=?,seen=?,light=? WHERE id=?',x,z,yaw,pitch,now,body.light&&p.prop<0&&!p.caught?1:0,p.id).run();
  roster=(await sql('SELECT * FROM players WHERE room=? AND seen>? ORDER BY id',p.room,now-45000).all()).results;
@@ -98,5 +148,6 @@ async function roomRequest(request,env){try{
   const hiders=roster.filter(q=>q.id!==room.seeker),seekerAlive=roster.some(q=>q.id===room.seeker);
   if(!seekerAlive||phase==='ended'||(hiders.length>0&&hiders.every(q=>q.caught))){const winner=!seekerAlive||phase==='ended'?'hiders':'seeker';await sql("UPDATE rooms SET phase='ended',winner=? WHERE code=? AND phase='playing'",winner,p.room).run();room.phase='ended';room.winner=winner;phase='ended'}
  }
- return json({now,room:{code:room.code,host:room.host,seeker:room.seeker,phase,round:room.round,starts:room.starts,winner:room.winner},players:roster.map(publicPlayer)});
+ return json({now,room:{code:room.code,host:room.host,seeker:room.seeker,phase,round:room.round,starts:room.starts,winner:room.winner},players:roster.map(publicPlayer),
+  traps:phase==='seeking'?roomTraps.map(t=>({id:t.id,x:t.x,z:t.z,triggered:t.triggered,result:t.result,resolved:t.resolved,yours:t.victim===p.id})):[]});
  }catch(e){return json({error:e.status?e.message:'Server error. Please try again.'},e.status||500)}}
