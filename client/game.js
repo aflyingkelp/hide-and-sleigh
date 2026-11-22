@@ -1,17 +1,17 @@
 import * as T from './three.module.js';
 import {boxes,props,buildings,trees,lamps,TYPES,blocked,spawn} from './world.js';
-const $=id=>document.getElementById(id),scene=new T.Scene();scene.background=new T.Color('#010207');scene.fog=new T.FogExp2('#03050b',.028);
+const $=id=>document.getElementById(id),scene=new T.Scene();scene.background=new T.Color('#010205');scene.fog=new T.FogExp2('#010205',.023);
 const renderer=new T.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,1.6));renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;renderer.shadowMap.type=T.PCFSoftShadowMap;renderer.outputColorSpace=T.SRGBColorSpace;document.body.prepend(renderer.domElement);
-const camera=new T.PerspectiveCamera(76,innerWidth/innerHeight,.055,135);camera.rotation.order='YXZ';scene.add(camera);scene.add(new T.HemisphereLight(0x26354a,0x030406,.055));const moon=new T.DirectionalLight(0x314566,.055);moon.position.set(-30,70,20);scene.add(moon);
+const camera=new T.PerspectiveCamera(76,innerWidth/innerHeight,.055,135);camera.rotation.order='YXZ';scene.add(camera);scene.add(new T.HemisphereLight(0x344563,0x080a10,.008));const moon=new T.DirectionalLight(0x52688e,.006);moon.position.set(-30,70,20);scene.add(moon);
 const materials=new Map(),geo={box:new T.BoxGeometry(1,1,1),sphere:new T.SphereGeometry(1,10,8),cone:new T.ConeGeometry(1,1,10),cylinder:new T.CylinderGeometry(1,1,1,12)};
-function material(c){if(!materials.has(c)){const m=new T.MeshStandardMaterial({color:c==='window'?'#ffcf89':c,roughness:.84});if(c==='window'){m.emissive.set('#d99e50');m.emissiveIntensity=.7}materials.set(c,m)}return materials.get(c)}
+function material(c){if(!materials.has(c)){const m=new T.MeshStandardMaterial({color:c==='window'?'#ffcf89':c,roughness:.84});materials.set(c,m)}return materials.get(c)}
 function mesh(parent,type,x,y,z,w,h,d,c){const m=new T.Mesh(geo[type],material(c));m.position.set(x,y,z);m.scale.set(w,h,d);m.castShadow=true;m.receiveShadow=true;parent.add(m);return m}
 // Static architecture uses GPU instancing; the large map stays inexpensive to draw.
 const batches=new Map(),architecture=[],matrix=new T.Matrix4(),q=new T.Quaternion(),v=new T.Vector3(),scale=new T.Vector3();
 const ground=mesh(scene,'box',0,-.3,0,210,.35,210,'#9fb8c7');ground.castShadow=false;
 for(const b of boxes){if(!batches.has(b.c))batches.set(b.c,[]);batches.get(b.c).push(b)}for(const [color,list]of batches){const m=new T.InstancedMesh(geo.box,material(color),list.length);list.forEach((b,i)=>{q.setFromEuler(new T.Euler(0,0,b.rot||0));matrix.compose(v.set(b.x,b.y,b.z),q,scale.set(b.w,b.h,b.d));m.setMatrixAt(i,matrix)});m.receiveShadow=true;m.castShadow=true;m.computeBoundingSphere();scene.add(m);architecture.push(m)}
-function textSign(text,x,y,z){const c=document.createElement('canvas');c.width=512;c.height=80;const ctx=c.getContext('2d');ctx.fillStyle='#183a34';ctx.fillRect(0,0,512,80);ctx.strokeStyle='#af9564';ctx.lineWidth=5;ctx.strokeRect(3,3,506,74);ctx.fillStyle='#ffe3b3';ctx.font='bold 30px Georgia';ctx.textAlign='center';ctx.fillText(text,256,49);const m=new T.Mesh(new T.PlaneGeometry(5.6,.88),new T.MeshBasicMaterial({map:new T.CanvasTexture(c)}));m.position.set(x,y,z);scene.add(m)}
-for(const b of buildings){textSign(b.name,b.x,2.9,b.z+b.d/2+2.85);const roofpeak=mesh(scene,'box',b.x,4.45,b.z,.35,.2,b.d+2,'#e0e7e7');roofpeak.castShadow=false;for(let i=-b.w/2+1;i<b.w/2;i+=1.5){const bulb=mesh(scene,'sphere',b.x+i,3.5,b.z+b.d/2+.3,.065,.065,.065,'#ffd48e');bulb.material=new T.MeshBasicMaterial({color:Math.round(i)%2?0xffcf7e:0xc93d4c})}}
+function textSign(text,x,y,z){const c=document.createElement('canvas');c.width=512;c.height=80;const ctx=c.getContext('2d');ctx.fillStyle='#183a34';ctx.fillRect(0,0,512,80);ctx.strokeStyle='#af9564';ctx.lineWidth=5;ctx.strokeRect(3,3,506,74);ctx.fillStyle='#ffe3b3';ctx.font='bold 30px Georgia';ctx.textAlign='center';ctx.fillText(text,256,49);const m=new T.Mesh(new T.PlaneGeometry(5.6,.88),new T.MeshStandardMaterial({map:new T.CanvasTexture(c),roughness:1}));m.position.set(x,y,z);scene.add(m)}
+for(const b of buildings){textSign(b.name,b.x,2.9,b.z+b.d/2+2.85);const roofpeak=mesh(scene,'box',b.x,4.45,b.z,.35,.2,b.d+2,'#e0e7e7');roofpeak.castShadow=false;for(let i=-b.w/2+1;i<b.w/2;i+=1.5){const bulb=mesh(scene,'sphere',b.x+i,3.5,b.z+b.d/2+.3,.065,.065,.065,'#ffd48e');bulb.material=material(Math.round(i)%2?'#ffcf7e':'#c93d4c')}}
 // The model factory is used for both scenery and live player disguises.
 function model(p){const g=new T.Group(),c=p.color||'#ad414d';const add=(type,x,y,z,w,h,d,col)=>mesh(g,type,x,y,z,w,h,d,col);
 if(p.type==='gift'){add('box',0,.4,0,.8,.8,.8,c);add('box',0,.41,0,.13,.83,.83,'#e4c17b');add('box',0,.83,0,.86,.08,.86,c);add('box',0,.88,0,.9,.04,.14,'#e4c17b')}
@@ -28,11 +28,20 @@ else if(p.type==='books'){for(let i=0;i<4;i++){const b=add('box',0,.06+i*.1,0,.7
 return g}
 const propGroups=[];for(const p of props){const g=model(p);g.position.set(p.x,.1,p.z);g.rotation.y=p.yaw;g.userData.propId=p.id;scene.add(g);propGroups.push(g)}
 for(const [x,z,s]of trees){mesh(scene,'cylinder',x,.6,z,.25,1.2,.25,'#604737');for(let i=0;i<3;i++){mesh(scene,'cone',x,1.7*s+i*s,z,(2-i*.4)*s,2.8*s,(2-i*.4)*s,'#224e43');mesh(scene,'cone',x,2.25*s+i*s,z,(1.55-i*.3)*s,1.7*s,(1.55-i*.3)*s,'#a9c5ce')}}
-const streetLights=[];for(const [x,z]of lamps){mesh(scene,'cylinder',x,1.8,z,.07,3.6,.07,'#334d56');const bulb=mesh(scene,'box',x,3.5,z,.45,.6,.45,'window');bulb.material=new T.MeshBasicMaterial({color:0xffca7c});const l=new T.PointLight(0xffc88a,12,14,2);l.position.set(x,3.4,z);scene.add(l);streetLights.push(l)}
-// Only nearby lanterns are lit at once; interiors get a local ambient glow.
-const roomLight=new T.PointLight(0xffc98f,0,0,2);scene.add(roomLight);
-const snow=new Float32Array(2400);for(let i=0;i<snow.length;i+=3){snow[i]=(Math.random()-.5)*90;snow[i+1]=5+Math.random()*15;snow[i+2]=(Math.random()-.5)*90}const snowGeo=new T.BufferGeometry();snowGeo.setAttribute('position',new T.BufferAttribute(snow,3));const snowfall=new T.Points(snowGeo,new T.PointsMaterial({color:0xcce6f3,size:.06,transparent:true,opacity:.55}));scene.add(snowfall);
-const torch=new T.SpotLight(0xe2f0ff,2200,62,Math.PI/8,.32,1.5);torch.castShadow=true;torch.shadow.mapSize.set(1024,1024);torch.shadow.bias=-.001;torch.position.set(.15,-.12,-.3);const beamTarget=new T.Object3D();beamTarget.position.set(0,0,-15);camera.add(beamTarget,torch);torch.target=beamTarget;const handheld=new T.Group();camera.add(handheld);mesh(handheld,'cylinder',.28,-.28,-.48,.05,.3,.05,'#233d44').rotation.x=Math.PI/2;
+for(const [x,z] of lamps){
+  mesh(scene,'cylinder',x,1.8,z,.07,3.6,.07,'#334d56');
+  mesh(scene,'box',x,3.5,z,.45,.6,.45,'window');
+}
+const snow=new Float32Array(2400);for(let i=0;i<snow.length;i+=3){snow[i]=(Math.random()-.5)*90;snow[i+1]=5+Math.random()*15;snow[i+2]=(Math.random()-.5)*90}const snowGeo=new T.BufferGeometry();snowGeo.setAttribute('position',new T.BufferAttribute(snow,3));const snowfall=new T.Points(snowGeo,new T.PointsMaterial({color:0x26394d,size:.06,transparent:true,opacity:.2}));scene.add(snowfall);
+function makeFlashlight(shadowSize){
+  const light=new T.SpotLight(0xe3efff,90,34,Math.PI/7,.62,1.8);
+  light.castShadow=true;
+  light.shadow.mapSize.set(shadowSize,shadowSize);
+  light.shadow.camera.near=.2;
+  light.shadow.bias=-.0004;
+  return light;
+}
+const torch=makeFlashlight(1024);torch.position.set(.15,-.12,-.3);const beamTarget=new T.Object3D();beamTarget.position.set(0,0,-15);camera.add(beamTarget,torch);torch.target=beamTarget;const handheld=new T.Group();camera.add(handheld);mesh(handheld,'cylinder',.28,-.28,-.48,.05,.3,.05,'#233d44').rotation.x=Math.PI/2;
 const apiOrigin = location.hostname === 'aflyingkelp.github.io'
   ? 'https://hide-and-sleigh-night-house.a-flying-kelp.chatgpt.site'
   : '';
@@ -57,25 +66,122 @@ $('begin').onclick=async()=>{try{await post('start',{seeker:$('seekerSelect').va
 function renderLobby(){if(!state||!session)return;const host=state.room.host===session.id;$('code').textContent=session.code;$('lobbyInfo').textContent=state.room.phase==='ended'?(state.room.winner==='seeker'?'The seeker found everyone.':'Hiders survived!')+' Choose the next seeker and play again.':state.room.phase==='lobby'?'Share this code and the game link with your friends.':'Round in progress. New arrivals watch until the next round.';$('roster').replaceChildren();for(const p of state.players){const row=document.createElement('div');row.className='person';const name=document.createElement('span');name.textContent=p.name+(p.id===session.id?' (you)':'');const role=document.createElement('small');role.textContent=p.id===state.room.host?'Host':p.caught?'Watching':'Connected';row.append(name,role);$('roster').append(row)}$('begin').style.display=host?'block':'none';$('seekerLabel').style.display=host?'grid':'none';$('begin').disabled=state.players.length<2||['hiding','seeking'].includes(state.room.phase);const selected=$('seekerSelect').value;const ids=state.players.map(p=>p.id).join(',');if($('seekerSelect').dataset.ids!==ids){$('seekerSelect').replaceChildren();for(const p of state.players){const option=document.createElement('option');option.value=p.id;option.textContent=p.name;$('seekerSelect').append(option)}$('seekerSelect').dataset.ids=ids;if(state.players.some(p=>p.id===selected))$('seekerSelect').value=selected}}
 async function sync(){if(!session||syncBusy)return;syncBusy=true;const revision=morphRevision;try{const next=await post('sync',{x:position.x,z:position.z,yaw,pitch,light:lightOn&&localProp<0});connected=true;serverOffset=next.now-Date.now();const old=state?.room.phase;state=next;const self=me();if(!self)throw new Error('You left this room.');if(lastRound!==state.room.round){lastRound=state.room.round;position.set(self.x,.1,self.z);localProp=self.prop;battery=100;stamina=100;lastJingle=-1;crouch=false;lightOn=seeker();if(state.room.round>0){$('lobby').style.display='none';paused=false;toast(seeker()?'YOU ARE THE SEEKER · Wait for the countdown.':'YOU ARE A HIDER · Aim at a prop and press E.')}}else{if(Math.hypot(position.x-self.x,position.z-self.z)>2.2)position.set(self.x,.1,self.z);if(revision===morphRevision&&!morphPending){localProp=self.prop;if(localProp>=0)lightOn=false}}if(state.room.phase==='ended'&&old!=='ended'){release();paused=true;$('lobby').style.display='grid';sound(state.room.winner==='hiders'?660:110,.8)}updateRemotes();if($('lobby').style.display==='grid')renderLobby();$('network').textContent='ROOM '+session.code+' · '+state.players.length+'/10 online';}catch(e){connected=false;$('network').textContent='Connection interrupted · retrying';if(/expired|again|left this room/i.test(e.message)){toast(e.message);leave()}}finally{syncBusy=false}}
 setInterval(sync,220);
-function character(isSeeker){const g=new T.Group();mesh(g,'cone',0,.85,0,isSeeker?.6:.35,1.6,isSeeker?.6:.35,isSeeker?'#aa3447':'#3a9e85');mesh(g,'sphere',0,1.7,0,.28,.28,.28,'#dbb792');mesh(g,'cone',0,2.1,0,.35,.65,.35,isSeeker?'#aa3447':'#3a9e85');if(isSeeker){mesh(g,'cone',0,1.48,.22,.26,.6,.26,'#e7e1cd');for(const x of [-.1,.1]){const m=mesh(g,'sphere',x,1.78,-.23,.04,.04,.04,'#e34349');m.material=new T.MeshBasicMaterial({color:0xff4a50})}}return g}
+function character(isSeeker){const g=new T.Group();mesh(g,'cone',0,.85,0,isSeeker?.6:.35,1.6,isSeeker?.6:.35,isSeeker?'#aa3447':'#3a9e85');mesh(g,'sphere',0,1.7,0,.28,.28,.28,'#dbb792');mesh(g,'cone',0,2.1,0,.35,.65,.35,isSeeker?'#aa3447':'#3a9e85');if(isSeeker){mesh(g,'cone',0,1.48,.22,.26,.6,.26,'#e7e1cd');for(const x of [-.1,.1]){const m=mesh(g,'sphere',x,1.78,-.23,.04,.04,.04,'#e34349');m.material=material('#b52836')}}return g}
+const remoteLights=new Map();
+const beamDirection=new T.Vector3();
+const beamRotation=new T.Euler(0,0,0,'YXZ');
+function updateRemoteFlashlights(){
+  for(const player of state?.players||[]){
+    if(player.id===session?.id)continue;
+    const remote=remotes.get(player.id);
+    if(!remote)continue;
+    let beam=remoteLights.get(player.id);
+    const enabled=player.light&&!player.caught&&player.prop<0
+      && !(state.room.phase==='hiding'&&state.room.seeker===player.id)
+      && remote.group.position.distanceTo(position)<47;
+    if(!beam&&enabled){
+      beam=makeFlashlight(512);
+      scene.add(beam,beam.target);
+      remoteLights.set(player.id,beam);
+    }
+    if(!beam)continue;
+    beam.visible=enabled;
+    if(!enabled)continue;
+    beamRotation.set(player.pitch,remote.group.rotation.y,0);
+    beamDirection.set(0,0,-1).applyEuler(beamRotation);
+    beam.position.copy(remote.group.position).setY(remote.group.position.y+1.6);
+    beam.position.addScaledVector(beamDirection,.55);
+    beam.target.position.copy(beam.position).addScaledVector(beamDirection,10);
+  }
+  for(const [id,beam] of remoteLights){
+    if(remotes.has(id))continue;
+    scene.remove(beam,beam.target);
+    beam.shadow.dispose();
+    remoteLights.delete(id);
+  }
+}
 function updateRemotes(){const live=new Set();for(const p of state.players){if(p.id===session.id)continue;live.add(p.id);let r=remotes.get(p.id);const kind=p.id===state.room.seeker?'seeker':p.prop>=0?'prop:'+p.prop:'elf';if(!r||r.kind!==kind){if(r)scene.remove(r.group);const g=p.prop>=0&&props[p.prop]?model(props[p.prop]):character(kind==='seeker');g.position.set(p.x,.1,p.z);g.userData.playerId=p.id;scene.add(g);r={group:g,kind,target:new T.Vector3(p.x,.1,p.z),yaw:p.yaw};remotes.set(p.id,r)}r.target.set(p.x,.1,p.z);r.yaw=p.yaw;r.group.visible=!p.caught||state.room.phase==='lobby'||state.room.phase==='ended';}for(const [id,r]of remotes)if(!live.has(id)){scene.remove(r.group);remotes.delete(id)}}
 function objectId(object,key){let o=object;while(o){if(o.userData[key]!==undefined)return o.userData[key];o=o.parent}return null}
-function aim(){ray.setFromCamera(new T.Vector2(0,0),camera);ray.far=5.5;const nearby=propGroups.filter((g,i)=>Math.hypot(props[i].x-position.x,props[i].z-position.z)<7);const hits=ray.intersectObjects([...architecture,...nearby,...Array.from(remotes.values(),r=>r.group)],true);const hit=hits[0];target=null;if(hit){const propId=objectId(hit.object,'propId'),playerId=objectId(hit.object,'playerId');if(propId!==null)target={propId,label:props[propId].label};else if(playerId!==null)target={playerId,label:'Suspicious object'}}const canCopy=target?.propId!==undefined&&!seeker()&&!caught();$('target').style.display=canCopy||target?.playerId&&seeker()?'block':'none';$('target').textContent=canCopy?'E · Copy '+target.label:seeker()?'CLICK · Tag':'';}
+function aim(){ray.setFromCamera(new T.Vector2(0,0),camera);ray.far=5.5;const nearby=propGroups.filter((g,i)=>Math.hypot(props[i].x-position.x,props[i].z-position.z)<7);const hits=ray.intersectObjects([...architecture,...nearby,...Array.from(remotes.values(),r=>r.group).filter(g=>g.visible)],true);const hit=hits[0];target=null;if(hit){const propId=objectId(hit.object,'propId'),playerId=objectId(hit.object,'playerId');if(propId!==null)target={propId,label:props[propId].label};else if(playerId!==null)target={playerId}}const canCopy=target?.propId!==undefined&&!seeker()&&!caught();$('target').style.display=canCopy?'block':'none';$('target').textContent=canCopy?'E · Copy '+target.label:'';}
 async function copy(un=false){if(!active()||paused||seeker()||caught()||morphPending)return;const id=un?-1:target?.propId;if(id===undefined){toast('Aim at a present, chair, barrel, crate, snowman, plant, or other small prop.');return}morphPending=true;++morphRevision;try{if(session){const r=await post('morph',{prop:id});localProp=r.prop}else localProp=id;if(localProp<0)crouch=false;if(localProp>=0){lightOn=false;sound(520,.2);toast('Copied: '+props[localProp].label+' · X to return')}else toast('Back to normal.')}catch(e){toast(e.message)}finally{++morphRevision;morphPending=false}}
 async function tag(){if(!active()||paused||!seeker()||performance.now()-lastTag<1000)return;lastTag=performance.now();try{const r=await post('tag',{target:target?.playerId||''});sound(r.hit?780:180,.15);toast(r.hit?'FOUND '+r.name+'!':'Nothing here.')}catch(e){toast(e.message)}}
 $('mobileCopy').onclick=()=>copy();$('mobileTag').onclick=tag;$('mobileLight').onclick=()=>{if(localProp<0)lightOn=!lightOn};
 renderer.domElement.addEventListener('click',()=>{if(paused)return;lock();if(seeker())tag()});renderer.domElement.addEventListener('pointerdown',e=>{dragging=true;renderer.domElement.setPointerCapture?.(e.pointerId)});addEventListener('pointerup',()=>dragging=false);addEventListener('mousemove',e=>{if(active()&&!paused&&(dragging||document.pointerLockElement===renderer.domElement)){yaw-=e.movementX*.0023;pitch=T.MathUtils.clamp(pitch-e.movementY*.0023,-1.25,1.25)}});
 addEventListener('keydown',e=>{if(['INPUT','SELECT'].includes(document.activeElement?.tagName))return;const k=e.key.toLowerCase();keys[k]=true;if(['w','a','s','d',' ','arrowup','arrowdown','arrowleft','arrowright'].includes(k))e.preventDefault();if(e.repeat)return;if(k==='e')copy();if(k==='x')copy(true);if(k==='f'&&localProp<0&&!caught())lightOn=!lightOn;if(k==='c')crouch=!crouch;if(k==='m')mapOpen=!mapOpen;if(k===' ')tag();if(k==='escape'&&active()&&!paused)$('roomButton').click()});addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);addEventListener('blur',()=>keys={});
 document.querySelectorAll('[data-key]').forEach(b=>{b.onpointerdown=e=>{keys[b.dataset.key]=true;b.setPointerCapture(e.pointerId)};b.onpointerup=b.onpointercancel=()=>keys[b.dataset.key]=false});
+const JINGLE_RANGE=50;
+let jingleSignal=null;
+function jingleBearing(x,z){
+  // Zero points straight ahead. Positive angles point to the player's right.
+  return Math.atan2(x-position.x,-(z-position.z))+yaw;
+}
+function playJingle(player,strength,index){
+  if(!audio||audio.state!=='running')return;
+  const spatial=audio.createPanner();
+  spatial.panningModel='HRTF';
+  spatial.rolloffFactor=0;
+  const angle=jingleBearing(player.x,player.z);
+  spatial.positionX.value=Math.sin(angle);
+  spatial.positionZ.value=-Math.cos(angle);
+  spatial.connect(audio.destination);
+  const start=audio.currentTime+index*.11;
+  const notes=[];
+  for(const [offset,ratio] of [[0,1],[.12,1.33],[.25,1.67]]){
+    const oscillator=audio.createOscillator();
+    const gain=audio.createGain();
+    const at=start+offset;
+    oscillator.frequency.value=740*ratio;
+    gain.gain.setValueAtTime(.001,at);
+    gain.gain.linearRampToValueAtTime(.13*strength,at+.018);
+    gain.gain.exponentialRampToValueAtTime(.001,at+.24);
+    oscillator.connect(gain).connect(spatial);
+    oscillator.start(at);
+    oscillator.stop(at+.25);
+    notes.push(oscillator);
+  }
+  notes.at(-1).onended=()=>spatial.disconnect();
+}
+function ringJingles(time,room){
+  const cycle=(time-room.starts-20000)/25000;
+  const j=Math.floor(cycle);
+  if(j<=lastJingle)return;
+  lastJingle=j;
+  if(j<1||cycle-j>.08)return;
+  if(!seeker()){
+    if(!caught()){sound(880,.24,.04);toast('Your bells just rang.')}
+    return;
+  }
+  const audible=state.players.filter(p=>p.id!==room.seeker&&!p.caught)
+    .map(p=>({...p,strength:Math.max(0,1-Math.hypot(p.x-position.x,p.z-position.z)/JINGLE_RANGE)**1.45}))
+    .filter(p=>p.strength>.025).sort((a,b)=>b.strength-a.strength);
+  audible.forEach((p,index)=>playJingle(p,p.strength,index));
+  if(audible.length)jingleSignal={...audible[0],until:performance.now()+2600};
+}
+function updateJingleMeter(now,phase){
+  const show=seeker()&&phase==='seeking'&&!paused;
+  $('jingleMeter').hidden=!show;
+  if(!show){jingleSignal=null;return}
+  const signal=jingleSignal?.until>now?jingleSignal:null;
+  $('jingleLevel').value=signal?.strength||0;
+  $('jingleArrow').hidden=!signal;
+  if(!signal){$('jingleDirection').textContent='Listening…';return}
+  const degrees=jingleBearing(signal.x,signal.z)*180/Math.PI;
+  const sector=((Math.round(degrees/45)%8)+8)%8;
+  const directions=['Ahead','Ahead right','Right','Behind right','Behind','Behind left','Left','Ahead left'];
+  const range=signal.strength>.57?'Near':signal.strength>.25?'Mid-range':'Far';
+  $('jingleArrow').style.transform='rotate('+degrees+'deg)';
+  $('jingleDirection').textContent=directions[sector]+' · '+range;
+}
 function drawMap(){const c=mapCtx,X=x=>(x+105)*720/210,Z=z=>(z+105)*720/210;c.fillStyle='#0a2029ee';c.fillRect(0,0,720,720);c.strokeStyle='#55766d';c.strokeRect(10,10,700,700);c.fillStyle='#25413f';for(const b of buildings){c.fillRect(X(b.x-b.w/2),Z(b.z-b.d/2),b.w*720/210,b.d*720/210);c.fillStyle='#c8dbd1';c.font='11px Arial';c.textAlign='center';const words=b.name.split(' ');c.fillText(words.slice(0,-1).join(' '),X(b.x),Z(b.z)-3);c.fillText(words.at(-1),X(b.x),Z(b.z)+10);c.fillStyle='#25413f'}c.fillStyle='#dac48d';c.font='13px Arial';c.fillText('CHRISTMAS SQUARE',360,355);c.fillStyle='#8bffd1';c.beginPath();c.arc(X(position.x),Z(position.z),4,0,7);c.fill();c.strokeStyle='#8bffd1';c.beginPath();c.moveTo(X(position.x),Z(position.z));c.lineTo(X(position.x-Math.sin(yaw)*4),Z(position.z-Math.cos(yaw)*4));c.stroke();c.textAlign='left';c.fillStyle='#c8dbd1';c.fillText('M · CLOSE     /     YOUR POSITION',22,697)}
 function frame(now){requestAnimationFrame(frame);const dt=Math.min((now-last)/1000,.05);last=now;const playing=active()&&!paused&&!frozen();moving=false;let sprint=false;
 if(playing){if(keys.q||keys.arrowleft)yaw+=dt*1.6;if(keys.r||keys.arrowright)yaw-=dt*1.6;const x=(keys.d?1:0)-(keys.a?1:0),z=(keys.s||keys.arrowdown?1:0)-(keys.w||keys.arrowup?1:0);moving=!!(x||z);sprint=moving&&keys.shift&&stamina>3&&localProp<0;if(sprint)crouch=false;if(moving){const n=Math.hypot(x,z),speed=(sprint?7:crouch?2.2:localProp>=0?3.4:4.5)*dt,dx=(x*Math.cos(yaw)+z*Math.sin(yaw))/n*speed,dz=(-x*Math.sin(yaw)+z*Math.cos(yaw))/n*speed,r=localProp>=0?props[localProp].r:.32;if(!blocked(position.x+dx,position.z,r))position.x+=dx;if(!blocked(position.x,position.z+dz,r))position.z+=dz;if(localProp<0&&now-lastStep>(sprint?280:470)){lastStep=now;sound(75+Math.random()*30,.07,crouch?.006:.02)}}stamina=T.MathUtils.clamp(stamina+(sprint?-24:16)*dt,0,100);if(lightOn&&localProp<0&&!frozen()&&!caught()){battery=Math.max(0,battery-dt*.32);if(!battery)lightOn=false}if(!lightOn)battery=Math.min(100,battery+dt*.1)}
 const eye=localProp>=0?Math.max(.4,props[localProp].h*.88):crouch?1.05:1.72;camera.position.set(position.x,position.y+eye+(moving?Math.sin(now*(sprint?.015:.01))*.025:0),position.z);camera.rotation.set(pitch,yaw,0);torch.visible=active()&&lightOn&&localProp<0&&battery>0&&!caught()&&!frozen();handheld.visible=active()&&localProp<0&&!caught();handheld.position.y=moving?Math.sin(now*.01)*.01:0;
 for(const r of remotes.values()){r.group.position.lerp(r.target,1-Math.exp(-dt*13));r.group.rotation.y=T.MathUtils.lerp(r.group.rotation.y,r.yaw,1-Math.exp(-dt*12))}for(let i=0;i<propGroups.length;i++)propGroups[i].visible=Math.hypot(props[i].x-position.x,props[i].z-position.z)<58;
-let nearCount=0;for(const l of streetLights){const near=l.position.distanceTo(camera.position)<25;l.visible=near&&nearCount++<5}const building=buildings.find(b=>Math.abs(position.x-b.x)<b.w/2&&Math.abs(position.z-b.z)<b.d/2);roomLight.visible=false;roomLight.intensity=0;roomLight.position.set(position.x,position.y+1,position.z);$('location').textContent=building?.name.toUpperCase()||'SNOWFALL VILLAGE';
+updateRemoteFlashlights();const building=buildings.find(b=>Math.abs(position.x-b.x)<b.w/2&&Math.abs(position.z-b.z)<b.d/2);$('location').textContent=building?.name.toUpperCase()||'SNOWFALL VILLAGE';
 if(active()&&!paused&&!frozen())aim();else $('target').style.display='none';$('battery').textContent=(lightOn&&localProp<0?'ON':'OFF')+' · '+Math.ceil(battery)+'%';$('stamina').style.width=stamina+'%';$('map').style.display=mapOpen&&active()&&!frozen()?'block':'none';if(mapOpen)drawMap();
 const room=state?.room,phase=room?.phase;let info='Explore solo',sub='24 buildings · 96 rooms';if(mode==='online'&&room){const time=Date.now()+serverOffset,seconds=Math.max(0,Math.ceil(((phase==='hiding'?room.starts+20000:room.starts+200000)-time)/1000));info=phase==='lobby'?'Waiting for friends':phase==='ended'?'Round complete':phase==='hiding'?'Hide! '+seconds:Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0');sub=phase==='lobby'?'Host starts the round':caught()?'CAUGHT · Watching until next round':seeker()?'SEEKER · '+state.players.filter(p=>p.id!==session.id&&!p.caught).length+' hiders remain':'HIDER · '+(localProp>=0?props[localProp].label:'Find an object to copy');
-if(phase==='seeking'){const j=Math.floor((time-room.starts-20000)/25000);if(j!==lastJingle){lastJingle=j;if(j>0)for(const p of state.players.filter(p=>p.id!==room.seeker&&!p.caught)){const d=Math.hypot(p.x-position.x,p.z-position.z);if(d<45){const a=Math.atan2(p.x-position.x,p.z-position.z)+yaw;sound(900,.65,.13*(1-d/45),Math.sin(a));if(p.id===session.id)toast('JINGLE! Your bells just rang.')}}}}}
+if(phase==='seeking')ringJingles(time,room);}
+updateJingleMeter(now,phase);
 $('status').replaceChildren();const big=document.createElement('span');big.textContent=info;const small=document.createElement('small');small.textContent=sub;$('status').append(big,small);$('blackout').style.display=frozen()&&!paused?'grid':'none';if(frozen())$('hideCountdown').textContent='You are the seeker. Searching starts in '+Math.max(0,Math.ceil((room.starts+20000-Date.now()-serverOffset)/1000))+' seconds.';
 if(now>toastUntil)$('message').textContent=!active()?'':caught()?'You were found. Explore while the remaining hiders play.':localProp>=0?'YOU ARE A '+props[localProp].label.toUpperCase()+' · Move carefully · X to return':seeker()?'Look for props that do not belong. Aim and click to tag.':mode==='online'&&phase==='lobby'?'Share the room code. Copy props while you wait.':'Aim at an object and press E to copy it.';
 for(let i=1;i<snow.length;i+=3){snow[i]-=dt*.8;if(snow[i]<4.8)snow[i]=20}snowGeo.attributes.position.needsUpdate=true;snowfall.position.set(Math.floor(position.x/20)*20,0,Math.floor(position.z/20)*20);renderer.render(scene,camera)}
