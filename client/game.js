@@ -63,7 +63,19 @@ const remotes=new Map(),ray=new T.Raycaster(),mapCtx=$('map').getContext('2d');l
 function active(){return mode==='explore'||mode==='online'}function me(){return state?.players.find(p=>p.id===session?.id)}function seeker(){return mode==='online'&&state?.room.seeker===session?.id}function caught(){return mode==='online'&&me()?.caught&&['hiding','seeking'].includes(state?.room.phase)}function frozen(){return seeker()&&state?.room.phase==='hiding'}
 function toast(text){$('message').textContent=text;toastUntil=performance.now()+2800}
 function sound(f=440,d=.15,volume=.04,pan=0){if(!audio)return;const o=audio.createOscillator(),g=audio.createGain(),p=audio.createStereoPanner();o.type=f<150?'triangle':'sine';o.frequency.value=f;g.gain.setValueAtTime(volume,audio.currentTime);g.gain.exponentialRampToValueAtTime(.001,audio.currentTime+d);p.pan.value=pan;o.connect(g).connect(p).connect(audio.destination);o.start();o.stop(audio.currentTime+d)}
-function initAudio(){audio??=new(window.AudioContext||window.webkitAudioContext)();audio.resume();loadTauntAudio()}
+function initAudio(){
+  if(!audio){
+    audio=new(window.AudioContext||window.webkitAudioContext)();
+    audio.addEventListener('statechange',flushTaunts);
+  }
+  if(audio.state!=='running')audio.resume().then(flushTaunts).catch(()=>{});
+  loadTauntAudio();
+}
+function unlockGameAudio(event){
+  if(event.isTrusted&&active()&&audio?.state!=='running')initAudio();
+}
+addEventListener('pointerdown',unlockGameAudio,true);
+addEventListener('keydown',unlockGameAudio,true);
 async function post(action,data={}){const r=await fetch(apiOrigin+'/api/'+action,{method:'POST',credentials:'omit',headers:{'Content-Type':'application/json'},body:JSON.stringify({...session,...data}),signal:AbortSignal.timeout(7000)});const body=await r.json();if(!r.ok)throw new Error(body.error||'Connection failed');return body}
 const viewCanvas=renderer.domElement;
 let lockPending=false;
@@ -350,25 +362,48 @@ function updateJingleMeter(now,phase){
 function drawMap(){const c=mapCtx,X=x=>(x+105)*720/210,Z=z=>(z+105)*720/210;c.fillStyle='#0a2029ee';c.fillRect(0,0,720,720);c.strokeStyle='#55766d';c.strokeRect(10,10,700,700);c.fillStyle='#25413f';for(const b of buildings){c.fillRect(X(b.x-b.w/2),Z(b.z-b.d/2),b.w*720/210,b.d*720/210);c.fillStyle='#c8dbd1';c.font='11px Arial';c.textAlign='center';const words=b.name.split(' ');c.fillText(words.slice(0,-1).join(' '),X(b.x),Z(b.z)-3);c.fillText(words.at(-1),X(b.x),Z(b.z)+10);c.fillStyle='#25413f'}c.fillStyle='#dac48d';c.font='13px Arial';c.fillText('CHRISTMAS SQUARE',360,355);c.fillStyle='#8bffd1';c.beginPath();c.arc(X(position.x),Z(position.z),4,0,7);c.fill();c.strokeStyle='#8bffd1';c.beginPath();c.moveTo(X(position.x),Z(position.z));c.lineTo(X(position.x-Math.sin(yaw)*4),Z(position.z-Math.cos(yaw)*4));c.stroke();c.textAlign='left';c.fillStyle='#c8dbd1';c.fillText('M · CLOSE     /     YOUR POSITION',22,697)}
 let wheelOpen=false,activeTrap=null,tauntReady=0,tauntPending=false,trapPending=false;
 const tauntBuffers=[];
+const queuedTaunts=[];
+const tauntMaxAge=7000;
 const lastTaunts=new Map(), heardTraps=new Map(), trapMeshes=new Map();
 function loadTauntAudio(){
   if(tauntBuffers.length)return;
   for(let i=0;i<tauntNames.length;i++){
     tauntBuffers.push(fetch(new URL('./taunts/'+(i+1)+'.mp3',import.meta.url))
       .then(response=>{if(!response.ok)throw Error('Sound unavailable');return response.arrayBuffer()})
-      .then(bytes=>audio.decodeAudioData(bytes)).catch(()=>null));
+      .then(bytes=>audio.decodeAudioData(bytes))
+      .then(buffer=>{
+        let peak=.01;
+        for(let channel=0;channel<buffer.numberOfChannels;channel++){
+          for(const sample of buffer.getChannelData(channel))peak=Math.max(peak,Math.abs(sample));
+        }
+        return {buffer,clipGain:Math.min(3,.85/peak)};
+      }).catch(()=>null));
   }
 }
+function flushTaunts(){
+  if(audio?.state!=='running')return;
+  for(const event of queuedTaunts.splice(0))playTaunt(event);
+}
 async function playTaunt(event){
-  if(!audio||audio.state!=='running')return;
-  const distance=Math.hypot(event.x-position.x,event.z-position.z);
-  if(distance>=42)return;
-  const buffer=await tauntBuffers[event.sound];
-  if(!buffer||!active())return;
+  const queued=event.received===undefined?{...event,received:performance.now(),room:session?.code}:event;
+  if(!active()||queued.room!==session?.code||performance.now()-queued.received>tauntMaxAge)return;
+  if(audio?.state!=='running'){
+    queuedTaunts.push(queued);
+    if(queuedTaunts.length>12)queuedTaunts.shift();
+    return;
+  }
+  loadTauntAudio();
+  const decoded=await tauntBuffers[queued.sound];
+  if(!decoded||!active()||queued.room!==session?.code||performance.now()-queued.received>tauntMaxAge)return;
+  if(audio.state!=='running'){playTaunt(queued);return}
+  const distance=Math.hypot(queued.x-position.x,queued.z-position.z);
+  const volume=seeker() ? .16+.28/(1+(distance/24)**1.35) : .42*Math.max(0,1-distance/64)**1.4;
+  if(!volume)return;
+  const {buffer,clipGain}=decoded;
   const clip=audio.createBufferSource(),gain=audio.createGain(),pan=audio.createStereoPanner();
   clip.buffer=buffer;
-  gain.gain.value=.38*(1-distance/42)**1.5;
-  pan.pan.value=Math.sin(jingleBearing(event.x,event.z));
+  gain.gain.value=volume*clipGain;
+  pan.pan.value=Math.sin(jingleBearing(queued.x,queued.z))*.85;
   clip.connect(gain).connect(pan).connect(audio.destination);
   clip.start(0,0,Math.min(buffer.duration,4));
 }
@@ -422,6 +457,7 @@ function clearTrapMeshes(){
   for(const mesh of trapMeshes.values())scene.remove(mesh);
   trapMeshes.clear();
   lastTaunts.clear();
+ queuedTaunts.length=0;
   heardTraps.clear();
 }
 function setActiveTrap(trap){
@@ -452,7 +488,7 @@ function syncSoundsAndTraps(next,self){
     const event=player.taunt;
     if(player.id!==self.id&&event&&event.time>(lastTaunts.get(player.id)||0)){
       lastTaunts.set(player.id,event.time);
-      if(next.now-event.time<1800)playTaunt(event);
+      if(next.now-event.time<tauntMaxAge)playTaunt(event);
     }
   }
   const traps=next.traps||[];
