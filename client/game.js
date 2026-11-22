@@ -1,35 +1,16 @@
 import * as T from './three.module.js';
 import {boxes,props,buildings,trees,lamps,TYPES,blocked,spawn,rocketCooldown,tauntNames,trapBeats,trapWindow,trapDuration} from './world.js';
-const $=id=>document.getElementById(id),scene=new T.Scene();scene.background=new T.Color('#111c2c');scene.fog=new T.FogExp2('#111c2c',.017);
+const $=id=>document.getElementById(id),scene=new T.Scene();scene.background=new T.Color('#010205');scene.fog=new T.FogExp2('#010205',.023);
 const renderer=new T.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,1.6));renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;renderer.shadowMap.type=T.PCFSoftShadowMap;renderer.outputColorSpace=T.SRGBColorSpace;document.body.prepend(renderer.domElement);
-const camera=new T.PerspectiveCamera(76,innerWidth/innerHeight,.055,135);camera.rotation.order='YXZ';scene.add(camera);scene.add(new T.HemisphereLight(0x9ebff1,0x263950,.21));const moon=new T.DirectionalLight(0xb3ccf4,.23);moon.position.set(-30,70,20);scene.add(moon);
-const materials=new Map(),geo={box:new T.BoxGeometry(1,1,1),sphere:new T.OctahedronGeometry(1,0),cone:new T.ConeGeometry(1,1,4),cylinder:new T.CylinderGeometry(1,1,1,6)};
-function material(c){if(!materials.has(c)){const m=new T.MeshStandardMaterial({color:c==='window'?'#e8ba78':c,roughness:.94,flatShading:true});materials.set(c,m)}return materials.get(c)}
+const camera=new T.PerspectiveCamera(76,innerWidth/innerHeight,.055,135);camera.rotation.order='YXZ';scene.add(camera);scene.add(new T.HemisphereLight(0x7196c8,0x2b3449,.105));const moon=new T.DirectionalLight(0x8ba9d9,.13);moon.position.set(-30,70,20);scene.add(moon);
+const materials=new Map(),geo={box:new T.BoxGeometry(1,1,1),sphere:new T.SphereGeometry(1,10,8),cone:new T.ConeGeometry(1,1,10),cylinder:new T.CylinderGeometry(1,1,1,12)};
+function material(c){if(!materials.has(c)){const m=new T.MeshStandardMaterial({color:c==='window'?'#ffcf89':c,roughness:.84});materials.set(c,m)}return materials.get(c)}
 function mesh(parent,type,x,y,z,w,h,d,c){const m=new T.Mesh(geo[type],material(c));m.position.set(x,y,z);m.scale.set(w,h,d);m.castShadow=true;m.receiveShadow=true;parent.add(m);return m}
 // Static architecture uses GPU instancing; the large map stays inexpensive to draw.
 const batches=new Map(),architecture=[],matrix=new T.Matrix4(),q=new T.Quaternion(),v=new T.Vector3(),scale=new T.Vector3();
-const ground=mesh(scene,'box',0,-.3,0,210,.35,210,'#afc5d8');ground.castShadow=false;
-const facade=[];
-function trim(x,y,z,w,h,d,c){facade.push({x,y,z,w,h,d,c})}
-for(const b of buildings){
-  const edge=b.z+b.d/2;
-  for(const side of [-1,1]){
-    const wing=b.x+side*b.w*.27;
-    trim(wing,10.94,b.z,b.w*.49,.16,b.d+.76,'#c7dcea');
-    trim(b.x+side*(b.w/2-.19),5.55,edge+.19,.32,10.8,.24,'#72899a');
-    for(let floor=0;floor<3;floor++){
-      const y=2+floor*3.6;
-      trim(wing,y,edge+.3,.09,1.2,.09,'#43556a');
-      trim(wing,y,edge+.3,2.3,.09,.09,'#43556a');
-      trim(wing,y-.69,edge+.33,2.65,.15,.37,'#b3c9d4');
-      trim(wing,y+1.17,edge+.25,b.w*.46,.11,.23,'#879caf');
-    }
-  }
-  trim(b.x,10.95,b.z,.48,.25,b.d+1,'#e0e9ee');
-  trim(b.x,3.04,edge+1,3.7,.13,.39,'#b04147');
-}
+const ground=mesh(scene,'box',0,-.3,0,210,.35,210,'#9fb8c7');ground.castShadow=false;
 // Small batches let the camera and flashlight skip geometry across town.
-for(const box of [...boxes,...facade]){
+for(const box of boxes){
   const key=Math.floor(box.x/27)+','+Math.floor(box.z/27)+','+box.c;
   if(!batches.has(key))batches.set(key,[]);
   batches.get(key).push(box);
@@ -50,19 +31,6 @@ else if(p.type==='lantern'){add('box',0,.28,0,.36,.5,.36,'#dfb769');for(const x 
 else if(p.type==='sack'){add('sphere',0,.44,0,.45,.48,.4,c);add('cylinder',0,.85,0,.17,.22,.17,c);add('box',0,.85,0,.4,.07,.4,'#d5bb81')}
 else if(p.type==='soldier'){add('box',0,.75,0,.45,.6,.3,c);add('sphere',0,1.25,0,.23,.23,.23,'#d6b993');add('cylinder',0,1.5,0,.25,.32,.25,'#273440');for(const x of [-.15,.15])add('box',x,.22,0,.15,.45,.25,'#263b45');add('box',0,.75,.17,.06,.6,.04,'#d4b96f')}
 else if(p.type==='books'){for(let i=0;i<4;i++){const b=add('box',0,.06+i*.1,0,.7,.09,.5,i%2?c:'#d0b77f');b.rotation.y=i*.1}}
-else if(p.type==='wreath'){for(const [x,y,w,h] of [[0,.14,.63,.17],[0,.69,.63,.17],[-.29,.41,.16,.69],[.29,.41,.16,.69]])add('box',x,y,0,w,h,.17,'#3e725c');add('box',0,.71,.12,.24,.12,.12,'#ba494c')}
-else if(p.type==='rocking'){add('box',0,.13,0,.28,.14,.94,'#875648');add('box',0,.59,0,.42,.26,.68,c);add('box',0,.87,-.27,.25,.32,.22,c);add('box',0,1,-.4,.25,.17,.23,c);for(const z of [-.23,.23])add('box',0,.32,z,.25,.37,.17,'#926c51')}
-else if(p.type==='floorlamp'){add('box',0,.055,0,.57,.11,.57,'#475568');add('box',0,.8,0,.08,1.5,.08,'#8f755b');add('cylinder',0,1.6,0,.37,.39,.37,'#dbc389')}
-else if(p.type==='suitcase'||p.type==='trunk'){const height=p.type==='trunk'?.83:.59;add('box',0,height/2,0,.82,height,.57,c);for(const x of [-.26,.26])add('box',x,height/2,.295,.08,height,.033,'#9b805c');add('box',0,height+.05,0,.29,.07,.09,'#302b32')}
-else if(p.type==='globe'){add('box',0,.08,0,.59,.16,.59,'#5d4f44');add('box',0,.48,0,.12,.7,.12,'#967452');add('sphere',0,1.04,0,.42,.42,.42,'#5c9aa7');add('box',.24,1.08,0,.14,.19,.25,'#719566')}
-else if(p.type==='clock'){add('box',0,1.1,0,.7,2.2,.4,'#654a43');add('box',0,2.15,0,.82,.2,.48,'#82634c');add('box',0,1.82,.22,.44,.41,.04,'#c4a879');add('box',0,1.87,.25,.032,.19,.035,'#242633');add('box',0,1,.22,.3,.83,.04,'#3c3840')}
-else if(p.type==='teddy'){add('sphere',0,.32,0,.32,.32,.22,'#9a7058');add('sphere',0,.64,0,.27,.24,.22,'#a47e62');for(const x of [-.17,.17])add('box',x,.77,0,.15,.13,.13,'#976f57');add('box',0,.57,.19,.2,.13,.08,'#c3a083')}
-else if(p.type==='candelabra'){add('box',0,.04,0,.4,.08,.4,'#9e8153');add('box',0,.44,0,.07,.84,.07,'#9e8153');add('box',0,.74,0,.57,.07,.08,'#9e8153');for(const x of [-.25,0,.25])add('box',x,.96,0,.09,.37,.09,'#ddd0b6')}
-else if(p.type==='harp'){add('box',0,.075,0,.76,.15,.39,'#976b45');add('box',-.28,.69,0,.13,1.3,.16,'#a4794e');const arm=add('box',-.02,.76,0,.12,1.12,.15,'#a4794e');arm.rotation.z=.56;for(let i=0;i<5;i++)add('box',-.19+i*.092,.25+i*.06,0,.017,.36+i*.12,.018,'#e0be78')}
-else if(p.type==='nutcracker'){add('box',0,.59,0,.48,.72,.38,c);add('box',0,1.04,0,.34,.32,.29,'#ccab89');add('box',0,1.3,0,.43,.35,.35,'#313c51');add('box',0,.18,0,.45,.26,.38,'#283241')}
-else if(p.type==='ornament'){add('sphere',0,.44,0,.45,.45,.45,c);add('box',0,.91,0,.29,.18,.29,'#c9aa68')}
-else if(p.type==='birdcage'){add('box',0,.1,0,.67,.19,.67,'#8e7559');add('cone',0,1.02,0,.45,.36,.45,'#80694f');for(const x of [-.32,.32])for(const z of [-.32,.32])add('box',x,.53,z,.045,.85,.045,'#ae9068')}
-else if(p.type==='telescope'){for(const x of [-.24,.24]){const leg=add('box',x,.44,0,.07,.9,.08,'#796650');leg.rotation.z=x};const lens=add('cylinder',0,1.03,0,.18,.71,.18,'#576677');lens.rotation.x=1.15}
 return g}
 const propGroups=[];for(const p of props){const g=model(p);g.position.set(p.x,.1,p.z);g.rotation.y=p.yaw;g.userData.propId=p.id;scene.add(g);propGroups.push(g)}
 for(const [x,z,s]of trees){mesh(scene,'cylinder',x,.6,z,.25,1.2,.25,'#604737');for(let i=0;i<3;i++){mesh(scene,'cone',x,1.7*s+i*s,z,(2-i*.4)*s,2.8*s,(2-i*.4)*s,'#224e43');mesh(scene,'cone',x,2.25*s+i*s,z,(1.55-i*.3)*s,1.7*s,(1.55-i*.3)*s,'#a9c5ce')}}
