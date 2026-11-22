@@ -1,0 +1,7 @@
+import fs from 'node:fs';
+const assets={};for(const name of ['index.html','game.js','world.js','three.module.js'])assets['/'+name]=fs.readFileSync('client/'+name,'utf8');
+const world=fs.readFileSync('client/world.js','utf8').replaceAll('export ','');
+const api=fs.readFileSync('worker/api.js','utf8').replace(/^import .*;\n/,'').replace('export async function api','async function api');
+fs.mkdirSync('dist/server',{recursive:true});fs.mkdirSync('dist/.openai',{recursive:true});
+fs.writeFileSync('dist/server/index.js',world+'\n'+api+'\nconst ASSETS='+JSON.stringify(assets)+`;\nexport default {async fetch(request,env){const url=new URL(request.url);if(url.pathname.startsWith('/api/'))return api(request,env);if(request.method!=='GET'&&request.method!=='HEAD')return new Response('Method not allowed',{status:405});const path=url.pathname==='/'?'/index.html':url.pathname;const body=ASSETS[path];if(body===undefined)return new Response('Not found',{status:404});return new Response(request.method==='HEAD'?null:body,{headers:{'Content-Type':path.endsWith('.js')?'application/javascript; charset=utf-8':'text/html; charset=utf-8','Cache-Control':path.endsWith('three.module.js')?'public,max-age=86400':'no-cache','X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin'}})}};`);
+fs.copyFileSync('.openai/hosting.json','dist/.openai/hosting.json');console.log('Built Worker with multiplayer API and '+Object.keys(assets).length+' bundled assets.');
