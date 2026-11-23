@@ -1,10 +1,11 @@
-export const sledOuter=19;
-export const sledInner=11;
+export const sledOuter=24;
+export const sledInner=13;
 export const sledIntro=4200;
 export const sledRush=10000;
 export const sledBlast=1600;
 export const sledRadius=2;
 export const sledStep=32;
+const sledLane=18.5;
 
 export function newSledMatch(ids,now){
   return sledHeat({initial:ids.length,heat:0,racers:ids.map(id=>({id,alive:true,score:0}))},now);
@@ -20,8 +21,8 @@ function sledHeat(match,now){
   const offset=match.heat*.69;
   racers.forEach((r,i)=>{
     const angle=offset+2*Math.PI*i/racers.length;
-    Object.assign(r,{x:15*Math.cos(angle),z:15*Math.sin(angle),vx:0,vz:0,
-      yaw:-angle-Math.PI,angle,gift:true,ax:0,az:0,inputAt:now});
+    Object.assign(r,{vx:0,vz:0,angle,gift:true,ax:0,az:0,inputAt:now});
+    driveLap(r,0);
   });
   match.receivers=Array.from({length:racers.length-1},(_,i)=>{
     const angle=offset+i*Math.PI*2/(racers.length-1);
@@ -29,6 +30,38 @@ function sledHeat(match,now){
     return {x:Math.cos(angle)*radius,z:Math.sin(angle)*radius,claim:null};
   });
   return match;
+}
+export function driveLap(racer,elapsed){
+  const rate=.00054;
+  const angle=racer.angle+elapsed*rate;
+  racer.x=sledLane*Math.cos(angle);
+  racer.z=sledLane*Math.sin(angle);
+  racer.yaw=-angle-Math.PI;
+  racer.vx=-sledLane*rate*1000*Math.sin(angle);
+  racer.vz=sledLane*rate*1000*Math.cos(angle);
+}
+
+// Shared by the server and the local driver view. Handoffs and damage stay server-side.
+export function driveSled(racer,turn,throttle,dt){
+  const speed=Math.hypot(racer.vx,racer.vz);
+  racer.yaw-=turn*dt*(1.85+Math.min(speed,14)*.065);
+  const forwardX=-Math.sin(racer.yaw),forwardZ=-Math.cos(racer.yaw);
+  const along=racer.vx*forwardX+racer.vz*forwardZ;
+  const grip=Math.exp(-3.3*dt);
+  const drag=Math.exp(-(throttle<0?5.8:throttle>0?.38:.9)*dt);
+  const acceleration=throttle>0?19:throttle<0&&Math.abs(along)<3?-6:0;
+  racer.vx=((racer.vx-along*forwardX)*grip+along*forwardX)*drag+forwardX*acceleration*dt;
+  racer.vz=((racer.vz-along*forwardZ)*grip+along*forwardZ)*drag+forwardZ*acceleration*dt;
+  const nextSpeed=Math.hypot(racer.vx,racer.vz);
+  if(nextSpeed>16){racer.vx*=16/nextSpeed;racer.vz*=16/nextSpeed}
+  racer.x+=racer.vx*dt;racer.z+=racer.vz*dt;
+  const radial=Math.hypot(racer.x,racer.z);
+  if(radial>sledOuter-.63){
+    const nx=racer.x/radial,nz=racer.z/radial;
+    const outward=Math.max(0,racer.vx*nx+racer.vz*nz);
+    racer.x=nx*(sledOuter-.63);racer.z=nz*(sledOuter-.63);
+    racer.vx-=1.24*outward*nx;racer.vz-=1.24*outward*nz;
+  }
 }
 function finishSledHeat(match,at){
   const racers=match.racers.filter(r=>r.alive);
@@ -60,9 +93,7 @@ export function advanceSled(match,now){
     if(match.phase==='ended')return match;
     if(match.phase==='lap'){
       for(const r of match.racers.filter(r=>r.alive)){
-        const a=r.angle+(at-match.start)*.00054;
-        r.x=15*Math.cos(a);r.z=15*Math.sin(a);r.yaw=-a-Math.PI;
-        r.vx=-8.1*Math.sin(a);r.vz=8.1*Math.cos(a);
+        driveLap(r,at-match.start);
       }
       if(at>=match.deadline){
         match.phase='rush';match.start=at;match.deadline=at+sledRush;
@@ -72,20 +103,7 @@ export function advanceSled(match,now){
     if(at>=match.deadline){finishSledHeat(match,at);continue}
     for(const r of match.racers.filter(r=>r.alive)){
       const steer=at-r.inputAt<380;
-      const damping=Math.exp(-(steer&&(r.ax||r.az)?1.85:3.2)*sledStep/1000);
-      r.vx=r.vx*damping+(steer?r.ax:0)*.84;
-      r.vz=r.vz*damping+(steer?r.az:0)*.84;
-      const speed=Math.hypot(r.vx,r.vz);
-      if(speed>10.5){r.vx*=10.5/speed;r.vz*=10.5/speed}
-      r.x+=r.vx*sledStep/1000;r.z+=r.vz*sledStep/1000;
-      const radial=Math.hypot(r.x,r.z);
-      if(radial>sledOuter-.55){
-        const nx=r.x/radial,nz=r.z/radial;
-        const bounce=Math.max(0,r.vx*nx+r.vz*nz);
-        r.x=nx*(sledOuter-.55);r.z=nz*(sledOuter-.55);
-        r.vx-=1.35*bounce*nx;r.vz-=1.35*bounce*nz;
-      }
-      if(speed>.35)r.yaw=Math.atan2(-r.vx,-r.vz);
+      driveSled(r,steer?r.ax:0,steer?-r.az:0,sledStep/1000);
       if(!r.gift)continue;
       const target=match.receivers.find(q=>!q.claim&&Math.hypot(q.x-r.x,q.z-r.z)<1.36);
       if(target){target.claim=r.id;r.gift=false}
@@ -96,9 +114,9 @@ export function advanceSled(match,now){
 export function steerSled(match,id,x,z,now){
   const racer=match.racers.find(r=>r.id===id&&r.alive);
   if(!racer)return;
-  const ax=Number.isFinite(x)?x:0,az=Number.isFinite(z)?z:0;
-  const length=Math.max(1,Math.hypot(ax,az));
-  racer.ax=ax/length;racer.az=az/length;racer.inputAt=now;
+  racer.ax=Number.isFinite(x)?Math.max(-1,Math.min(1,x)):0;
+  racer.az=Number.isFinite(z)?Math.max(-1,Math.min(1,z)):0;
+  racer.inputAt=now;
 }
 export function removeSledRacer(match,id){
   const racer=match.racers.find(r=>r.id===id&&r.alive);

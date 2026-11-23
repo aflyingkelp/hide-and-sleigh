@@ -1,28 +1,37 @@
 import * as T from './three.module.js';
-import {sledOuter,sledInner,sledRadius,sledRush,sledBlast} from './sled-rules.js';
+import {sledOuter,sledInner,sledRadius,sledBlast,driveLap,driveSled} from './sled-rules.js?v=13';
 
 export function makeSledArena(makeAvatar){
   const scene=new T.Scene();
-  scene.background=new T.Color('#091726');
-  scene.add(new T.HemisphereLight(0xd4f4ff,0x577399,2.1));
-  const sky=new T.DirectionalLight(0xd1eaff,2.5);
+  scene.background=new T.Color('#30485e');
+  scene.fog=new T.FogExp2('#30485e',.012);
+  scene.add(new T.HemisphereLight(0xd4f4ff,0x577399,1.65));
+  const sky=new T.DirectionalLight(0xd1eaff,1.8);
   sky.position.set(-18,24,16);scene.add(sky);
-  const camera=new T.OrthographicCamera(-26,26,25,-25,.1,150);
-  camera.position.set(0,46,29);camera.lookAt(0,0,0);
-  const solid=color=>new T.MeshStandardMaterial({color,roughness:.82});
+  const camera=new T.PerspectiveCamera(78,innerWidth/innerHeight,.055,190);
+  camera.rotation.order='YXZ';
+  const materials=new Map();
+  const solid=color=>{
+    if(!materials.has(color))materials.set(color,new T.MeshStandardMaterial({color,roughness:.82}));
+    return materials.get(color);
+  };
+  const unitBox=new T.BoxGeometry(1,1,1);
   function mesh(geometry,material,parent,x=0,y=0,z=0){
     const item=new T.Mesh(geometry,material);
     item.position.set(x,y,z);parent.add(item);return item;
   }
   function box(w,h,d,color,parent,x=0,y=0,z=0){
-    return mesh(new T.BoxGeometry(w,h,d),solid(color),parent,x,y,z);
+    const item=mesh(unitBox,solid(color),parent,x,y,z);
+    item.scale.set(w,h,d);
+    return item;
   }
   function disc(geometry,material,parent,y){
     const item=mesh(geometry,material,parent,0,y,0);
     item.rotation.x=-Math.PI/2;return item;
   }
-  const lake=disc(new T.CircleGeometry(30,72),solid('#11283b'),scene,-1);
-  const ring=disc(new T.RingGeometry(sledInner,sledOuter,80),solid('#75a9be'),scene,0);
+  disc(new T.CircleGeometry(155,64),solid('#98b1c6'),scene,-1.05);
+  disc(new T.CircleGeometry(sledOuter+2,80),solid('#173247'),scene,-.88);
+  disc(new T.RingGeometry(sledInner,sledOuter,80),solid('#75a9be'),scene,0);
   const center=disc(new T.CircleGeometry(sledInner+.02,80),solid('#507e9c'),scene,0);
   const freezeLines=new T.Group();scene.add(freezeLines);
   for(let i=0;i<15;i++){
@@ -31,18 +40,70 @@ export function makeSledArena(makeAvatar){
     scratch.rotation.y=a*.61;
   }
   disc(new T.RingGeometry(sledInner-.02,sledInner+.13,80),solid('#c6e6fb'),scene,.023);
-  disc(new T.RingGeometry(14.9,15.04,80),solid('#a4d1e4'),scene,.017);
-  const wall=new T.Group();scene.add(wall);
-  const blocks=56;
+  disc(new T.RingGeometry(18.45,18.55,80),solid('#a4d1e4'),scene,.017);
+  const boxRows=new Map();
+  function sceneryBox(color,x,y,z,w,h,d,yaw=0){
+    if(!boxRows.has(color))boxRows.set(color,[]);
+    boxRows.get(color).push({x,y,z,w,h,d,yaw});
+  }
+  const blocks=68;
   for(let i=0;i<blocks;i++){
     const a=i*Math.PI*2/blocks;
-    const panel=new T.Group();
-    panel.position.set(Math.sin(a)*sledOuter,0,Math.cos(a)*sledOuter);
-    panel.rotation.y=a;wall.add(panel);
-    box(2.18,1.35,.62,i%2?'#294d69':'#416883',panel,0,.66,0);
-    box(2.18,.16,.7,'#d0e7ef',panel,0,1.42,0);
-    if(i%7===0)box(.23,.29,.28,'#fc616f',panel,0,1.63,0);
+    const x=Math.sin(a)*sledOuter,z=Math.cos(a)*sledOuter;
+    sceneryBox(i%2?'#294d69':'#416883',x,.72,z,2.25,1.48,.62,a);
+    sceneryBox('#d0e7ef',x,1.52,z,2.25,.16,.7,a);
+    if(i%5===0){
+      sceneryBox('#f86c72',x,1.69,z,.38,.29,.35,a);
+      sceneryBox('#d0eef5',x*.974,.84,z*.974,.27,.82,.08,a);
+    }
   }
+  for(let sector=0;sector<4;sector++){
+    const axis=sector*Math.PI/2;
+    for(let j=0;j<8;j++){
+      const radius=17.65+j*.23;
+      sceneryBox(j%2?'#e2f2f4':'#afc6d2',Math.sin(axis)*radius,.018,Math.cos(axis)*radius,.54,.02,.23,axis);
+    }
+  }
+  for(let i=0;i<18;i++){
+    const a=i*2.399,r=36+(i%5)*5.8;
+    sceneryBox(i%2?'#7395a9':'#657f97',Math.cos(a)*r,1.1+(i%4)*.37,Math.sin(a)*r,5+i%3,3+i%4,3.8,a);
+  }
+  const matrix=new T.Matrix4(),quaternion=new T.Quaternion(),euler=new T.Euler();
+  const translation=new T.Vector3(),scale=new T.Vector3();
+  for(const [color,rows] of boxRows){
+    const batch=new T.InstancedMesh(unitBox,solid(color),rows.length);
+    rows.forEach((row,i)=>{
+      quaternion.setFromEuler(euler.set(0,row.yaw,0));
+      matrix.compose(translation.set(row.x,row.y,row.z),quaternion,scale.set(row.w,row.h,row.d));
+      batch.setMatrixAt(i,matrix);
+    });
+    scene.add(batch);
+  }
+  const pineShape=new T.ConeGeometry(1,1,5);
+  const trees=new T.InstancedMesh(pineShape,solid('#294f56'),220);
+  const snowcaps=new T.InstancedMesh(pineShape,solid('#9dbacb'),220);
+  for(let i=0;i<110;i++){
+    const angle=i*2.399, radius=32+(i%11)*4.7;
+    const x=Math.cos(angle)*radius,z=Math.sin(angle)*radius;
+    const size=3.3+(i%7)*.57;
+    quaternion.setFromEuler(euler.set(0,angle,0));
+    for(let tier=0;tier<2;tier++){
+      const width=size*(tier?.27:.42),y=size*(tier?.78:.46);
+      matrix.compose(translation.set(x,y,z),quaternion,scale.set(width,size*.75,width));
+      trees.setMatrixAt(i*2+tier,matrix);
+      matrix.compose(translation.set(x,y+size*.16,z),quaternion,scale.set(width*.56,size*.45,width*.56));
+      snowcaps.setMatrixAt(i*2+tier,matrix);
+    }
+  }
+  scene.add(trees,snowcaps);
+  const landscape=new T.InstancedMesh(new T.ConeGeometry(1,1,5),solid('#54738d'),15);
+  for(let i=0;i<15;i++){
+    const a=i*2*Math.PI/15,r=84+(i%3)*13,h=17+(i%4)*5;
+    quaternion.setFromEuler(euler.set(0,a,0));
+    matrix.compose(translation.set(Math.sin(a)*r,h*.47,Math.cos(a)*r),quaternion,scale.set(22,h,20));
+    landscape.setMatrixAt(i,matrix);
+  }
+  scene.add(landscape);
   const sleds=new Map();
   function gift(parent,x,y,z){
     const present=new T.Group();
@@ -63,8 +124,7 @@ export function makeSledArena(makeAvatar){
     const avatar=makeAvatar(id);
     avatar.position.set(0,.38,.24);avatar.scale.setScalar(1.04);root.add(avatar);
     const parcel=gift(root,0,.37,-.57);
-    const under=local?disc(new T.RingGeometry(.96,1.09,24),new T.MeshBasicMaterial({color:0xffd483}),root,.025):null;
-    const entry={root,parcel,under};
+    const entry={root,parcel,avatar};
     sleds.set(id,entry);return entry;
   }
   let receiverModels=[],blastModels=[],key='';
@@ -87,11 +147,44 @@ export function makeSledArena(makeAvatar){
       return {root,marker,parcel,ring:root.children[0]};
     });
   }
-  function draw(renderer,match,self,serverNow,dt){
+  let predicted=null,receivedTick=-1,driveKey='',lastCameraId='';
+  function reconcile(match,racer,input,serverNow,dt){
+    const key=match.heat+':'+match.phase+':'+racer.id;
+    if(key!==driveKey){
+      driveKey=key;predicted={...racer};receivedTick=-1;
+    }
+    if(match.phase==='lap'){
+      driveLap(predicted,Math.min(match.deadline,serverNow)-match.start);
+      return predicted;
+    }
+    if(match.phase!=='rush')return predicted;
+    driveSled(predicted,input.ax,-input.az,dt);
+    if(receivedTick!==match.tick){
+      receivedTick=match.tick;
+      const correction={...racer};
+      const elapsed=Math.max(0,Math.min(.32,(serverNow-match.tick)/1000));
+      for(let offset=0;offset<elapsed;offset+=.016){
+        driveSled(correction,input.ax,-input.az,Math.min(.016,elapsed-offset));
+      }
+      const gap=Math.hypot(predicted.x-correction.x,predicted.z-correction.z);
+      if(gap>3)Object.assign(predicted,correction);
+      else{
+        const turn=correction.yaw-predicted.yaw;
+        predicted.yaw+=Math.atan2(Math.sin(turn),Math.cos(turn))*.22;
+        predicted.x+=(correction.x-predicted.x)*.27;
+        predicted.z+=(correction.z-predicted.z)*.27;
+        predicted.vx+=(correction.vx-predicted.vx)*.26;
+        predicted.vz+=(correction.vz-predicted.vz)*.26;
+      }
+    }
+    return predicted;
+  }
+  function draw(renderer,match,self,serverNow,dt,input){
     const aspect=innerWidth/innerHeight;
-    const height=Math.max(21,23/aspect),width=height*aspect;
-    camera.left=-width;camera.right=width;camera.top=Math.max(22,height);camera.bottom=-camera.top;
-    camera.updateProjectionMatrix();
+    if(camera.aspect!==aspect){camera.aspect=aspect;camera.updateProjectionMatrix()}
+    const local=match.racers.find(r=>r.id===self);
+    const observer=local?.alive?local:match.racers.find(r=>r.alive);
+    const pose=observer?.id===self?reconcile(match,observer,input,serverNow,dt):observer;
     const renderKey=match.heat+':'+match.receivers.map(r=>r.x+','+r.z).join(';');
     if(renderKey!==key){key=renderKey;rebuild(match)}
     center.visible=freezeLines.visible=match.phase!=='lap';
@@ -106,7 +199,7 @@ export function makeSledArena(makeAvatar){
     }
     for(const r of match.racers){
       const entry=sleds.get(r.id)||rider(r.id,r.id===self);
-      const alpha=1-Math.exp(-dt*15);
+      const alpha=1-Math.exp(-dt*13);
       if(!entry.heat||entry.heat!==match.heat){entry.root.position.set(r.x,0,r.z);entry.root.rotation.y=r.yaw;entry.heat=match.heat}
       const drift=match.phase==='lap'||match.phase==='rush'?Math.min(.12,Math.max(0,(serverNow-match.tick)/1000)):0;
       entry.root.position.x+=(r.x+r.vx*drift-entry.root.position.x)*alpha;
@@ -115,6 +208,11 @@ export function makeSledArena(makeAvatar){
       entry.root.rotation.y+=Math.atan2(Math.sin(turn),Math.cos(turn))*alpha;
       entry.root.visible=r.alive;
       entry.parcel.visible=r.gift&&!inBlast;
+      entry.avatar.visible=r.id!==observer?.id;
+      if(pose&&r.id===observer.id){
+        entry.root.position.set(pose.x,0,pose.z);
+        entry.root.rotation.y=pose.yaw;
+      }
     }
     for(const [id,entry] of sleds)if(!match.racers.some(r=>r.id===id)){scene.remove(entry.root);sleds.delete(id)}
     if(match.phase==='blast'&&blastModels.length===0){
@@ -129,7 +227,23 @@ export function makeSledArena(makeAvatar){
       model.material.opacity=.86*(1-fade);
       model.visible=match.phase==='blast';
     }
+    if(pose){
+      const spectator=observer.id!==self;
+      const blend=spectator&&lastCameraId===observer.id?1-Math.exp(-dt*14):1;
+      camera.position.lerp(translation.set(pose.x,1.6,pose.z),blend);
+      const turn=pose.yaw-camera.rotation.y;
+      camera.rotation.y+=Math.atan2(Math.sin(turn),Math.cos(turn))*blend;
+      camera.rotation.x=-.115;
+      lastCameraId=observer.id;
+    }
     renderer.render(scene,camera);
+    if(!pose)return null;
+    const target=match.phase==='rush'&&observer.gift&&match.receivers
+      .filter(receiver=>!receiver.claim)
+      .sort((a,b)=>Math.hypot(pose.x-a.x,pose.z-a.z)-Math.hypot(pose.x-b.x,pose.z-b.z))[0];
+    const angle=target?Math.atan2(target.x-pose.x,-(target.z-pose.z))+pose.yaw:0;
+    const bearing=Math.atan2(Math.sin(angle),Math.cos(angle));
+    return {speed:Math.hypot(pose.vx,pose.vz),bearing,target};
   }
   return {draw};
 }
