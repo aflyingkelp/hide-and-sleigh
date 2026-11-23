@@ -15,3 +15,9 @@ export const traps=sqliteTable('traps',{
  result:text('result'),
  resolved:real('resolved')
 },t=>[index('traps_room_idx').on(t.room,t.round)]);
+
+export const sledMatches=sqliteTable('sled_matches',{
+ room:text('room').primaryKey().references(()=>rooms.code,{onDelete:'cascade'}),
+ state:text('state').notNull(),
+ version:integer('version').notNull().default(0)
+});

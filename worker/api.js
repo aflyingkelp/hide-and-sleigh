@@ -1,4 +1,5 @@
 import {blocked,clearLine,props,spawn,rocketPath,rocketCooldown,rocketRadius,tauntNames,trapBeats,trapWindow,trapDuration} from '../client/world.js';
+import {newSledMatch,advanceSled,steerSled,removeSledRacer} from '../client/sled-rules.js';
 const json=(data,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store'}});
 const fail=(message,status=400)=>{throw Object.assign(new Error(message),{status})};
 const publicPlayer=p=>({id:p.id,name:p.name,x:p.x,z:p.z,yaw:p.yaw,pitch:p.pitch,prop:p.prop,caught:!!p.caught,light:!!p.light,rocket:p.rocket?JSON.parse(p.rocket):null,taunt:p.taunt?JSON.parse(p.taunt):null});
@@ -49,6 +50,42 @@ async function roomRequest(request,env){try{
  if(!roster.some(q=>q.id===room.host)){room.host=p.id;await sql('UPDATE rooms SET host=? WHERE code=?',p.id,p.room).run()}
  let phase=room.phase;if(phase==='playing')phase=now<room.starts+20000?'hiding':now<room.starts+200000?'seeking':'ended';
  if(action==='leave'){await sql('DELETE FROM players WHERE id=?',p.id).run();return json({left:true})}
+ if(action==='start-sled'||action==='sled-sync'||action==='start'||action==='sync'){
+  let stored=await sql('SELECT state,version FROM sled_matches WHERE room=?',p.room).first();
+  if(action==='start-sled'){
+   if(room.host!==p.id)fail('Only the host can start.',403);
+   if(roster.length<2)fail('At least two players are needed.');
+   if(room.phase==='playing'||(stored&&JSON.parse(stored.state).phase!=='ended'))fail('A round is already running.',409);
+   const game=newSledMatch(roster.map(player=>player.id),now);
+   await sql('INSERT INTO sled_matches(room,state) VALUES(?,?) ON CONFLICT(room) DO UPDATE SET state=excluded.state,version=sled_matches.version+1',p.room,JSON.stringify(game)).run();
+   return json({started:true});
+  }
+  if(action==='start'&&stored){
+   if(room.host!==p.id)fail('Only the host can start.',403);
+   if(JSON.parse(stored.state).phase!=='ended')fail('Finish the sled round first.',409);
+   await sql('DELETE FROM sled_matches WHERE room=? AND version=?',p.room,stored.version).run();
+   stored=null;
+  }
+  if(stored&&(action==='sync'||action==='sled-sync')){
+   await sql('UPDATE players SET seen=? WHERE id=?',now,p.id).run();
+   const ids=new Set([...roster.map(player=>player.id),p.id]);
+   let game;
+   for(let attempt=0;attempt<8;attempt++){
+    game=JSON.parse(stored.state);
+    if(game.phase==='ended')break;
+    for(const racer of game.racers)if(!ids.has(racer.id))removeSledRacer(game,racer.id);
+    advanceSled(game,now);
+    if(action==='sled-sync')steerSled(game,p.id,body.ax,body.az,now);
+    const update=await sql('UPDATE sled_matches SET state=?,version=version+1 WHERE room=? AND version=?',JSON.stringify(game),p.room,stored.version).run();
+    if(update.meta?.changes??update.changes)break;
+    stored=await sql('SELECT state,version FROM sled_matches WHERE room=?',p.room).first();
+    if(!stored)return json({retry:true});
+    game=JSON.parse(stored.state);
+   }
+   return json({now,room:{code:room.code,host:room.host,seeker:null,phase:game.phase==='ended'?'ended':'sled',round:room.round,starts:room.starts},players:roster.map(publicPlayer),sled:game});
+  }
+  if(action==='sled-sync')return json({retry:true});
+ }
  if(action==='start'){
   if(room.host!==p.id)fail('Only the room host can start.',403);if(roster.length<2)fail('At least two players are needed. Share your room code.');
   const chosen=roster.find(q=>q.id===body.seeker)||roster[room.round%roster.length];
