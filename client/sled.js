@@ -1,5 +1,5 @@
 import * as T from './three.module.js';
-import {sledOuter,sledInner,sledRadius,sledBlast,driveLap,driveSled} from './sled-rules.js?v=15';
+import {sledOuter,sledInner,sledRadius,sledBlast,driveSled} from './sled-rules.js?v=16';
 
 export function makeSledArena(makeAvatar){
   const scene=new T.Scene();
@@ -209,19 +209,17 @@ export function makeSledArena(makeAvatar){
     inputHistory.length=0;
   }
   function reconcile(match,racer,input,serverNow,dt){
-    const key=match.heat+':'+match.phase+':'+racer.id;
+    const driving=match.phase==='lap'||match.phase==='rush';
+    const key=match.heat+':'+(driving?'drive':match.phase)+':'+racer.id;
     if(key!==driveKey){
       driveKey=key;predicted={...racer};receivedTick=-1;resetCorrection();
     }
-    if(match.phase==='lap'){
-      driveLap(predicted,Math.min(match.deadline,serverNow)-match.start);
-      return predicted;
-    }
-    if(match.phase!=='rush')return predicted;
+    if(!driving)return predicted;
+    const hollow=match.phase==='lap';
     const lastInput=inputHistory.at(-1);
     if(!lastInput||lastInput.ax!==input.ax||lastInput.az!==input.az)inputHistory.push({...input,time:serverNow});
     while(inputHistory.length>1&&inputHistory[1].time<serverNow-850)inputHistory.shift();
-    driveSled(predicted,input.ax,-input.az,dt);
+    driveSled(predicted,input.ax,-input.az,dt,hollow);
     if(receivedTick!==match.tick){
       receivedTick=match.tick;
       const replay={...racer};
@@ -231,16 +229,16 @@ export function makeSledArena(makeAvatar){
       for(const sample of inputHistory){
         if(sample.time<=begin){applied=sample;continue}
         if(sample.time>serverNow)break;
-        driveSled(replay,applied.ax,-applied.az,(sample.time-cursor)/1000);
+        driveSled(replay,applied.ax,-applied.az,(sample.time-cursor)/1000,hollow);
         cursor=sample.time;
         applied=sample;
       }
-      driveSled(replay,applied.ax,-applied.az,Math.max(0,(serverNow-cursor)/1000));
+      driveSled(replay,applied.ax,-applied.az,Math.max(0,(serverNow-cursor)/1000),hollow);
       const yawError=replay.yaw-predicted.yaw;
       correction.yaw=Math.atan2(Math.sin(yawError),Math.cos(yawError));
       for(const axis of ['x','z','vx','vz'])correction[axis]=replay[axis]-predicted[axis];
     }
-    const blend=1-Math.exp(-dt*7);
+    const blend=1-Math.exp(-dt*5);
     for(const axis of ['x','z','yaw','vx','vz']){
       const move=correction[axis]*blend;
       predicted[axis]+=move;
@@ -302,7 +300,7 @@ export function makeSledArena(makeAvatar){
       const forwardX=-Math.sin(pose.yaw),forwardZ=-Math.cos(pose.yaw);
       camera.position.lerp(translation.set(pose.x+forwardX*.17,1.55,pose.z+forwardZ*.17),blend);
       const turn=pose.yaw-camera.rotation.y;
-      camera.rotation.y+=Math.atan2(Math.sin(turn),Math.cos(turn))*blend;
+      camera.rotation.y+=Math.atan2(Math.sin(turn),Math.cos(turn))*(driverChanged?1:1-Math.exp(-dt*13));
       camera.rotation.x=-.1;
       lastCameraId=observer.id;
     }

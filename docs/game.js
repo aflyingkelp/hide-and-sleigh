@@ -1,6 +1,7 @@
 import * as T from './three.module.js';
 import {boxes,props,buildings,trees,lamps,TYPES,blocked,spawn,rocketCooldown,tauntNames,trapBeats,trapWindow,trapDuration} from './world.js';
-import {makeSledArena} from './sled.js?v=15';
+import {makeSledArena} from './sled.js?v=16';
+import {makeSantaMaze} from './santa.js?v=16';
 const $=id=>document.getElementById(id),scene=new T.Scene();scene.background=new T.Color('#010205');scene.fog=new T.FogExp2('#010205',.023);
 const renderer=new T.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,1.6));renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;renderer.shadowMap.type=T.PCFSoftShadowMap;renderer.outputColorSpace=T.SRGBColorSpace;document.body.prepend(renderer.domElement);
 const camera=new T.PerspectiveCamera(76,innerWidth/innerHeight,.055,135);camera.rotation.order='YXZ';scene.add(camera);scene.add(new T.HemisphereLight(0x7196c8,0x2b3449,.105));const moon=new T.DirectionalLight(0x8ba9d9,.13);moon.position.set(-30,70,20);scene.add(moon);
@@ -116,13 +117,13 @@ function release(){
 async function connect(action){$('error').textContent='';$('create').disabled=$('join').disabled=true;try{initAudio();session=await post(action,{name:$('name').value,code:$('joinCode').value});sessionStorage.setItem('hide-sleigh-session',JSON.stringify(session));mode='online';lastRound=-1;$('menu').style.display='none';$('lobby').style.display='grid';await sync();}catch(e){$('error').textContent=e.message;session=null}finally{$('create').disabled=$('join').disabled=false}}
 $('create').onclick=()=>connect('create');$('join').onclick=()=>connect('join');$('joinCode').onkeydown=e=>{if(e.key==='Enter')connect('join')};$('explore').onclick=()=>{initAudio();mode='explore';paused=false;localProp=-1;position.set(0,.1,12);$('menu').style.display='none';lock()};
 function lobby(){release();paused=true;$('paused').style.display='none';if(session){$('lobby').style.display='grid';renderLobby()}else $('menu').style.display='grid'}
-$('roomButton').onclick=()=>{if(state?.sled){sledLobbyToggle();return}if(!active())return;release();paused=true;$('paused').style.display='grid';$('pauseText').textContent=session?'The online round keeps running while this menu is open.':'Solo exploration paused.'};$('showLobby').onclick=lobby;$('resume').onclick=()=>{$('paused').style.display='none';paused=false;lock()};$('walk').onclick=()=>{$('lobby').style.display='none';paused=false;lock()};
+$('roomButton').onclick=()=>{if(state?.sled||state?.santa){sledLobbyToggle();return}if(!active())return;release();paused=true;$('paused').style.display='grid';$('pauseText').textContent=session?'The online round keeps running while this menu is open.':'Solo exploration paused.'};$('showLobby').onclick=lobby;$('resume').onclick=()=>{$('paused').style.display='none';paused=false;lock()};$('walk').onclick=()=>{$('lobby').style.display='none';paused=false;lock()};
 async function leave(){if(session)try{await post('leave')}catch{}session=null;state=null;clearSledHud();sessionStorage.removeItem('hide-sleigh-session');mode='menu';paused=false;setWheel(false,false);setActiveTrap(null);clearTrapMeshes();localProp=-1;clinging=false;rocketReady=0;for(const r of remotes.values())scene.remove(r.group);remotes.clear();release();$('paused').style.display=$('lobby').style.display='none';$('menu').style.display='grid';$('blackout').style.display='none'}$('leave').onclick=leave;$('quit').onclick=leave;
 $('copyCode').onclick=async()=>{try{await navigator.clipboard.writeText(session.code);$('copyCode').textContent='Copied';setTimeout(()=>$('copyCode').textContent='Copy code',1500)}catch{$('lobbyError').textContent='Room code: '+session.code}};
 $('gameSelect').onchange=()=>{if(state)renderLobby()};
-$('begin').onclick=async()=>{try{if($('gameSelect').value==='sled'){initAudio();await post('start-sled');await sync();return}await post('start',{seeker:$('seekerSelect').value});$('lobby').style.display='none';paused=false;await sync();lock()}catch(e){$('lobbyError').textContent=e.message}};
-function renderLobby(){if(!state||!session)return;const host=state.room.host===session.id;$('code').textContent=session.code;$('lobbyInfo').textContent=state.room.phase==='ended'?(state.room.winner==='seeker'?'The seeker found everyone.':'Hiders survived!')+' Choose the next seeker and play again.':state.room.phase==='lobby'?'Share this code and the game link with your friends.':'Round in progress. New arrivals watch until the next round.';$('roster').replaceChildren();for(const p of state.players){const row=document.createElement('div');row.className='person';const name=document.createElement('span');name.textContent=p.name+(p.id===session.id?' (you)':'');const role=document.createElement('small');role.textContent=p.id===state.room.host?'Host':p.caught?'Watching':'Connected';row.append(name,role);$('roster').append(row)}$('begin').style.display=host?'block':'none';$('gameSelection').hidden=!host;$('seekerLabel').style.display=host&&$('gameSelect').value==='hide'?'grid':'none';$('begin').disabled=state.players.length<2||['hiding','seeking','sled'].includes(state.room.phase);if(state.sled?.phase==='ended')renderSledResults();const selected=$('seekerSelect').value;const ids=state.players.map(p=>p.id).join(',');if($('seekerSelect').dataset.ids!==ids){$('seekerSelect').replaceChildren();for(const p of state.players){const option=document.createElement('option');option.value=p.id;option.textContent=p.name;$('seekerSelect').append(option)}$('seekerSelect').dataset.ids=ids;if(state.players.some(p=>p.id===selected))$('seekerSelect').value=selected}}
-async function sync(){if(!session||syncBusy)return;syncBusy=true;const revision=morphRevision;try{const inSled=!!state?.sled;const requestStart=performance.now();const next=inSled?await post('sled-sync',sledInput()):await post('sync',{x:position.x,z:position.z,yaw,pitch,light:lightOn&&localProp<0});if(next.retry){state=null;lastRound=-1;return}connected=true;const oneWay=next.sled?Math.min(170,(performance.now()-requestStart)/2):0;const measuredOffset=next.now+oneWay-Date.now();serverOffset=inSled&&next.sled?serverOffset+(measuredOffset-serverOffset)*.17:measuredOffset;const old=state?.room.phase;state=next;if(next.sled){receivedSled(next,old);return}if(inSled){lastRound=-1;clearSledHud()}const self=me();if(!self)throw new Error('You left this room.');if(lastRound!==state.room.round){lastRound=state.room.round;position.set(self.x,.1,self.z);localProp=self.prop;battery=100;stamina=100;lastJingle=-1;crouch=false;clinging=false;rocketReady=0;lightOn=seeker();if(state.room.round>0){$('lobby').style.display='none';paused=false;toast(seeker()?'YOU ARE THE SEEKER · Wait for the countdown.':'YOU ARE A HIDER · Aim at a prop and press E.')}}else{if(Math.hypot(position.x-self.x,position.z-self.z)>2.2)position.set(self.x,.1,self.z);if(revision===morphRevision&&!morphPending){localProp=self.prop;if(localProp>=0)lightOn=false}}if(state.room.phase==='ended'&&old!=='ended'){setWheel(false,false);release();paused=true;$('lobby').style.display='grid';sound(state.room.winner==='hiders'?660:110,.8)}updateRemotes();syncSoundsAndTraps(next,self);const remoteShot=state.players.find(p=>p.id===state.room.seeker&&p.id!==session.id)?.rocket;if(remoteShot&&remoteShot.time>lastRemoteShot){lastRemoteShot=remoteShot.time;if(next.now-remoteShot.time<1600)animateRocket(remoteShot.start,remoteShot.impact)}if($('lobby').style.display==='grid')renderLobby();$('network').textContent='ROOM '+session.code+' · '+state.players.length+'/10 online';}catch(e){connected=false;$('network').textContent='Connection interrupted · retrying';if(/expired|again|left this room/i.test(e.message)){toast(e.message);leave()}}finally{syncBusy=false}}
+$('begin').onclick=async()=>{try{const game=$('gameSelect').value;if(game!=='hide'){initAudio();await post('start-'+game);await sync();return}await post('start',{seeker:$('seekerSelect').value});$('lobby').style.display='none';paused=false;await sync();lock()}catch(e){$('lobbyError').textContent=e.message}};
+function renderLobby(){if(!state||!session)return;const host=state.room.host===session.id;$('code').textContent=session.code;$('lobbyInfo').textContent=state.room.phase==='ended'?(state.room.winner==='seeker'?'The seeker found everyone.':'Hiders survived!')+' Choose the next seeker and play again.':state.room.phase==='lobby'?'Share this code and the game link with your friends.':'Round in progress. New arrivals watch until the next round.';$('roster').replaceChildren();for(const p of state.players){const row=document.createElement('div');row.className='person';const name=document.createElement('span');name.textContent=p.name+(p.id===session.id?' (you)':'');const role=document.createElement('small');role.textContent=p.id===state.room.host?'Host':p.caught?'Watching':'Connected';row.append(name,role);$('roster').append(row)}$('begin').style.display=host?'block':'none';$('gameSelection').hidden=!host;$('seekerLabel').style.display=host&&$('gameSelect').value==='hide'?'grid':'none';$('begin').disabled=state.players.length<2||['hiding','seeking','sled','santa'].includes(state.room.phase);if(state.sled?.phase==='ended'||state.santa?.phase==='ended')renderSledResults();const selected=$('seekerSelect').value;const ids=state.players.map(p=>p.id).join(',');if($('seekerSelect').dataset.ids!==ids){$('seekerSelect').replaceChildren();for(const p of state.players){const option=document.createElement('option');option.value=p.id;option.textContent=p.name;$('seekerSelect').append(option)}$('seekerSelect').dataset.ids=ids;if(state.players.some(p=>p.id===selected))$('seekerSelect').value=selected}}
+async function sync(){if(!session||syncBusy)return;syncBusy=true;const revision=morphRevision;try{const inSled=!!state?.sled;const inSanta=!!state?.santa;const requestStart=performance.now();const next=inSanta?await post('santa-sync',{...santaArena?.position(),yaw}):inSled?await post('sled-sync',sledInput()):await post('sync',{x:position.x,z:position.z,yaw,pitch,light:lightOn&&localProp<0});if(next.retry){state=null;lastRound=-1;clearSledHud();return}connected=true;const oneWay=next.sled?Math.min(170,(performance.now()-requestStart)/2):0;const measuredOffset=next.now+oneWay-Date.now();serverOffset=inSled&&next.sled?serverOffset+(measuredOffset-serverOffset)*.17:measuredOffset;const old=state?.room.phase;state=next;if(next.santa){receivedSanta(next);return}if(next.sled){if(inSanta)clearSledHud();receivedSled(next,old);return}if(inSled||inSanta){lastRound=-1;clearSledHud()}const self=me();if(!self)throw new Error('You left this room.');if(lastRound!==state.room.round){lastRound=state.room.round;position.set(self.x,.1,self.z);localProp=self.prop;battery=100;stamina=100;lastJingle=-1;crouch=false;clinging=false;rocketReady=0;lightOn=seeker();if(state.room.round>0){$('lobby').style.display='none';paused=false;toast(seeker()?'YOU ARE THE SEEKER · Wait for the countdown.':'YOU ARE A HIDER · Aim at a prop and press E.')}}else{if(Math.hypot(position.x-self.x,position.z-self.z)>2.2)position.set(self.x,.1,self.z);if(revision===morphRevision&&!morphPending){localProp=self.prop;if(localProp>=0)lightOn=false}}if(state.room.phase==='ended'&&old!=='ended'){setWheel(false,false);release();paused=true;$('lobby').style.display='grid';sound(state.room.winner==='hiders'?660:110,.8)}updateRemotes();syncSoundsAndTraps(next,self);const remoteShot=state.players.find(p=>p.id===state.room.seeker&&p.id!==session.id)?.rocket;if(remoteShot&&remoteShot.time>lastRemoteShot){lastRemoteShot=remoteShot.time;if(next.now-remoteShot.time<1600)animateRocket(remoteShot.start,remoteShot.impact)}if($('lobby').style.display==='grid')renderLobby();$('network').textContent='ROOM '+session.code+' · '+state.players.length+'/10 online';}catch(e){connected=false;$('network').textContent='Connection interrupted · retrying';if(/expired|again|left this room/i.test(e.message)){toast(e.message);leave()}}finally{syncBusy=false}}
 setInterval(sync,150);
 // A random server-generated player ID picks a consistent picture for every viewer.
 const avatarLoader=new T.TextureLoader();
@@ -256,7 +257,9 @@ function toggleCling(){
 }
 $('mobileCopy').onclick=()=>copy();$('mobileTag').onclick=fireRocket;$('mobileCling').onclick=toggleCling;$('mobileLight').onclick=()=>{if(localProp<0)lightOn=!lightOn};
 viewCanvas.addEventListener('click',()=>{
-  if(state?.sled||paused||wheelOpen||activeTrap)return;
+  if(state?.sled){deliverGift();return}
+  if(state?.santa){if(!sledLobbyOpen)lock();return}
+  if(paused||wheelOpen||activeTrap)return;
   lock();
   if(seeker())fireRocket();
 });
@@ -296,7 +299,7 @@ function applyMouseLook(dt){
   yaw-=dx*.0023;
   pitch=T.MathUtils.clamp(pitch-dy*.0023,-1.25,1.25);
 }
-addEventListener('keydown',e=>{if(['INPUT','SELECT'].includes(document.activeElement?.tagName))return;const k=e.key.toLowerCase();keys[k]=true;if(['w','a','s','d',' ','arrowup','arrowdown','arrowleft','arrowright'].includes(k))e.preventDefault();if(e.repeat)return;if(state?.sled){if(k==='escape')sledLobbyToggle();return}if(activeTrap){if(k===' ')tapTrap();return}if(wheelOpen){if(k==='escape'||k==='t')setWheel(false);else if(/^[1-8]$/.test(k))sendTaunt(Number(k)-1);return}if(k==='t'){setWheel(true);return}if(k==='b'){placeTrap();return}if(k==='e')copy();if(k==='x')copy(true);if(k==='f'&&localProp<0&&!caught())lightOn=!lightOn;if(k==='c')crouch=!crouch;if(k==='m')mapOpen=!mapOpen;if(k===' ')fireRocket();if(k==='g')toggleCling();if(k==='shift'&&clinging)clinging=false;if(k==='escape'&&active()&&!paused)$('roomButton').click()});addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);addEventListener('blur',()=>{keys={};resetLook()});
+addEventListener('keydown',e=>{if(['INPUT','SELECT'].includes(document.activeElement?.tagName))return;const k=e.key.toLowerCase();keys[k]=true;if(['w','a','s','d',' ','arrowup','arrowdown','arrowleft','arrowright'].includes(k))e.preventDefault();if(e.repeat)return;if(state?.sled||state?.santa){if(k==='escape')sledLobbyToggle();if(k==='f'){if(state.sled)deliverGift();else santaFlash=!santaFlash}return}if(activeTrap){if(k===' ')tapTrap();return}if(wheelOpen){if(k==='escape'||k==='t')setWheel(false);else if(/^[1-8]$/.test(k))sendTaunt(Number(k)-1);return}if(k==='t'){setWheel(true);return}if(k==='b'){placeTrap();return}if(k==='e')copy();if(k==='x')copy(true);if(k==='f'&&localProp<0&&!caught())lightOn=!lightOn;if(k==='c')crouch=!crouch;if(k==='m')mapOpen=!mapOpen;if(k===' ')fireRocket();if(k==='g')toggleCling();if(k==='shift'&&clinging)clinging=false;if(k==='escape'&&active()&&!paused)$('roomButton').click()});addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);addEventListener('blur',()=>{keys={};resetLook()});
 document.querySelectorAll('[data-key]').forEach(b=>{b.onpointerdown=e=>{keys[b.dataset.key]=true;b.setPointerCapture(e.pointerId)};b.onpointerup=b.onpointercancel=()=>keys[b.dataset.key]=false});
 const JINGLE_RANGE=50;
 let jingleSignal=null;
@@ -546,10 +549,68 @@ function updateTrapChallenge(){
   $('trapProgress').textContent=activeTrap.submitted?'Checking…':elapsed<0?'Get ready…':activeTrap.taps.length+' / '+trapBeats.length+' beats';
   if(!activeTrap.submitted&&elapsed>trapBeats[activeTrap.taps.length]+trapWindow)sendTrapResult();
 }
-let sledArena=null;
+let sledArena=null,santaArena=null,santaPhaseKey=null,santaFlash=true,santaPulse=0;
+let sledNotice='',sledNoticeUntil=0,deliveryBusy=false;
 let sledPhase=null;
 let sledLobbyOpen=false;
 const hideHud=['hud','crosshair','target','jingleMeter','equipment','bottom','mobile','map','blackout'];
+async function deliverGift(){
+  if(state?.sled?.phase!=='rush'||sledLobbyOpen||deliveryBusy)return;
+  const self=state.sled.racers.find(p=>p.id===session.id);
+  if(!self?.alive||!self.gift)return;
+  deliveryBusy=true;
+  try{
+    await post('sled-deliver');
+    sledNotice='Gift delivered · Get clear';
+    sound(670,.18,.07);
+    sync();
+  }catch(error){sledNotice=error.message}
+  finally{sledNoticeUntil=performance.now()+1250;deliveryBusy=false}
+}
+$('sledDeliver').onclick=deliverGift;
+function receivedSanta(next){
+  const game=next.santa;
+  if(santaPhaseKey!==game.start){
+    clearSledHud();
+    santaPhaseKey=game.start;
+    release();
+    setWheel(false,false);
+    setActiveTrap(null);
+    paused=false;
+    yaw=Math.PI;pitch=0;santaFlash=true;
+    $('paused').style.display='none';
+    $('lobby').style.display='none';
+    for(const id of hideHud)$(id).classList.add('hidden');
+    $('roomButton').textContent='Room';
+  }
+  santaArena??=makeSantaMaze(character);
+  santaArena.receive(game,session.id);
+  if(game.phase==='ended'&&!sledLobbyOpen){release();sledLobbyOpen=true;$('lobby').style.display='grid'}
+  if(sledLobbyOpen)renderLobby();
+}
+function drawSanta(dt){
+  const game=state.santa,self=game.racers.find(p=>p.id===session.id);
+  const alive=self?.alive&&!self?.escaped;
+  const moving=alive&&!sledLobbyOpen&&game.phase==='running';
+  if(moving){
+    applyMouseLook(dt);
+    if(keys.q||keys.arrowleft)yaw+=dt*1.6;
+    if(keys.r||keys.arrowright)yaw-=dt*1.6;
+  }
+  const heard=santaArena.draw(renderer,game,session.id,dt,{yaw,pitch},moving?keys:{},santaFlash);
+  const remaining=Math.ceil(Math.max(0,game.deadline-Date.now()-serverOffset)/1000);
+  const fuses=game.fuses.filter(item=>item.found).length;
+  $('santaHud').hidden=false;
+  $('sledTouch').hidden=!moving;
+  $('sledDeliver').hidden=true;
+  $('santaTimer').textContent=game.phase==='ended'?'ROUND OVER':remaining+'s';
+  $('santaStatus').textContent=self?.escaped?'Escaped · 10 points':!alive?'Spectating':fuses===game.fuses.length?'Exit unlocked · Find the green door':fuses+' / '+game.fuses.length+' fuses · Stay away from Santa';
+  santaPulse-=dt;
+  if(moving&&heard<10&&santaPulse<=0){
+    santaPulse=.35+heard*.1;
+    sound(66,.14,.1*(1-heard/11));
+  }
+}
 function sledInput(){
   if(sledLobbyOpen)return {ax:0,az:0};
   const throttle=!!(keys.w||keys.arrowup);
@@ -561,22 +622,24 @@ function sledInput(){
 }
 function clearSledHud(){
   for(const id of hideHud)$(id).classList.remove('hidden');
-  $('sledHud').hidden=$('sledTouch').hidden=true;
+  $('sledHud').hidden=$('sledTouch').hidden=$('sledNav').hidden=$('santaHud').hidden=true;
+  santaPhaseKey=null;
   $('roomButton').textContent='Room / Pause';
   sledPhase=null;
   sledLobbyOpen=false;
 }
 function sledLobbyToggle(){
-  if(!state?.sled)return;
+  if(!state?.sled&&!state?.santa)return;
+  if(state?.santa)release();
   sledLobbyOpen=!sledLobbyOpen;
   keys={};
   $('lobby').style.display=sledLobbyOpen?'grid':'none';
   if(sledLobbyOpen)renderLobby();
 }
 function renderSledResults(){
-  const match=state.sled;
+  const match=state.sled||state.santa;
   const winner=state.players.find(p=>p.id===match.winner);
-  $('lobbyInfo').textContent=winner?winner.name+' won Sled Scramble.':'Everybody blew up. No winner.';
+  $('lobbyInfo').textContent=state.santa?(winner?winner.name+' reached the exit first.':'Nobody escaped the workshop.'):(winner?winner.name+' won Sled Scramble.':'Everybody blew up. No winner.');
   $('roster').replaceChildren();
   for(const racer of [...match.racers].sort((a,b)=>b.score-a.score)){
     const row=document.createElement('div');
@@ -620,17 +683,18 @@ function drawSled(dt){
   const serverNow=Date.now()+serverOffset;
   const seconds=Math.max(0,(game.deadline-serverNow)/1000);
   $('sledHud').hidden=false;
-  $('sledTouch').hidden=game.phase!=='rush'||!self?.alive||sledLobbyOpen;
+  $('sledTouch').hidden=!['lap','rush'].includes(game.phase)||!self?.alive||sledLobbyOpen;
+  $('sledDeliver').hidden=game.phase!=='rush'||!self?.gift;
   $('sledTimer').textContent=game.phase==='rush'?seconds.toFixed(1):game.phase==='lap'?Math.ceil(seconds):game.phase==='blast'?'BOOM':'ROUND OVER';
   const alive=game.racers.filter(r=>r.alive).length;
   const receivers=game.receivers.filter(r=>!r.claim).length;
-  const instruction=game.phase==='lap'?'The center freezes when the lap ends.'
+  const instruction=game.phase==='lap'?'Drive the ring · the center is still hollow'
     :game.phase==='blast'?alive+' left after the blast.'
     :game.phase==='ended'?(game.winner===session.id?'You won!':'See the final scores in the room.')
     :!self?.alive?'Spectating · '+alive+' sleds left'
-    :self.gift?receivers+' green receivers left · Deliver your gift'
+    :self.gift?receivers+' green receivers left · F or click to deliver'
     :'Gift delivered · Get clear of every gift';
-  $('sledStatus').textContent='Heat '+game.heat+' · '+instruction;
+  $('sledStatus').textContent='Heat '+game.heat+' · '+(performance.now()<sledNoticeUntil?sledNotice:instruction);
   sledArena??=makeSledArena(character);
   const view=sledArena.draw(renderer,game,session.id,serverNow,dt,sledInput());
   const speed=view?Math.round(view.speed*3.6):0;
@@ -647,7 +711,7 @@ document.querySelectorAll('[data-sled-key]').forEach(button=>{
   button.addEventListener('pointerdown',event=>{keys[key]=true;button.setPointerCapture(event.pointerId)});
   for(const event of ['pointerup','pointercancel','lostpointercapture'])button.addEventListener(event,()=>keys[key]=false);
 });
-function frame(now){requestAnimationFrame(frame);const dt=Math.min((now-last)/1000,.05);last=now;if(state?.sled){drawSled(dt);return}const playing=active()&&!paused&&!frozen()&&!wheelOpen&&!activeTrap;moving=false;let sprint=false;
+function frame(now){requestAnimationFrame(frame);const dt=Math.min((now-last)/1000,.05);last=now;if(state?.santa){drawSanta(dt);return}if(state?.sled){drawSled(dt);return}const playing=active()&&!paused&&!frozen()&&!wheelOpen&&!activeTrap;moving=false;let sprint=false;
 if(playing){applyMouseLook(dt);if(keys.q||keys.arrowleft)yaw+=dt*1.6;if(keys.r||keys.arrowright)yaw-=dt*1.6;const x=(keys.d?1:0)-(keys.a?1:0),z=(keys.s||keys.arrowdown?1:0)-(keys.w||keys.arrowup?1:0);moving=!!(x||z)&&!clinging;sprint=moving&&keys.shift&&stamina>3&&localProp<0;if(sprint)crouch=false;if(moving&&!clinging){const n=Math.hypot(x,z),speed=(sprint?7:crouch?2.2:localProp>=0?3.4:4.5)*dt,dx=(x*Math.cos(yaw)+z*Math.sin(yaw))/n*speed,dz=(-x*Math.sin(yaw)+z*Math.cos(yaw))/n*speed,r=localProp>=0?props[localProp].r:.32;if(!blocked(position.x+dx,position.z,r))position.x+=dx;if(!blocked(position.x,position.z+dz,r))position.z+=dz;if(localProp<0&&now-lastStep>(sprint?280:470)){lastStep=now;sound(75+Math.random()*30,.07,crouch?.006:.02)}}stamina=T.MathUtils.clamp(stamina+(sprint?-24:16)*dt,0,100);if(lightOn&&localProp<0&&!frozen()&&!caught()){battery=Math.max(0,battery-dt*.32);if(!battery)lightOn=false}if(!lightOn)battery=Math.min(100,battery+dt*.1)}
 const eye=localProp>=0?Math.max(.4,props[localProp].h*.88):clinging?1.38:crouch?1.05:1.72;camera.position.set(position.x,position.y+eye+(moving?Math.sin(now*(sprint?.015:.01))*.025:0),position.z);camera.rotation.set(pitch,yaw,clinging?.065:0);
 if(caught()||seeker()||localProp>=0)clinging=false;

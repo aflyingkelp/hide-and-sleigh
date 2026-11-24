@@ -21,8 +21,8 @@ function sledHeat(match,now){
   const offset=match.heat*.69;
   racers.forEach((r,i)=>{
     const angle=offset+2*Math.PI*i/racers.length;
-    Object.assign(r,{vx:0,vz:0,angle,gift:true,ax:0,az:0,inputAt:now});
-    driveLap(r,0);
+    Object.assign(r,{x:sledLane*Math.cos(angle),z:sledLane*Math.sin(angle),yaw:-angle-Math.PI,turnRate:0,
+      vx:0,vz:0,gift:true,ax:0,az:0,inputAt:now});
   });
   match.receivers=Array.from({length:racers.length-1},(_,i)=>{
     const angle=offset+i*Math.PI*2/(racers.length-1);
@@ -31,24 +31,16 @@ function sledHeat(match,now){
   });
   return match;
 }
-export function driveLap(racer,elapsed){
-  const rate=.00054;
-  const angle=racer.angle+elapsed*rate;
-  racer.x=sledLane*Math.cos(angle);
-  racer.z=sledLane*Math.sin(angle);
-  racer.yaw=-angle-Math.PI;
-  racer.vx=-sledLane*rate*1000*Math.sin(angle);
-  racer.vz=sledLane*rate*1000*Math.cos(angle);
-}
-
 // The small rink favors controllable turns with a little ice drift.
-export function driveSled(racer,turn,throttle,dt){
+export function driveSled(racer,turn,throttle,dt,hollow=false){
   const steps=Math.max(1,Math.ceil(dt*120));
-  for(let i=0;i<steps;i++)driveSledStep(racer,turn,throttle,dt/steps);
+  for(let i=0;i<steps;i++)driveSledStep(racer,turn,throttle,dt/steps,hollow);
 }
-function driveSledStep(racer,turn,throttle,dt){
+function driveSledStep(racer,turn,throttle,dt,hollow){
   const speed=Math.hypot(racer.vx,racer.vz);
-  racer.yaw-=turn*dt*(1.15+.67*Math.min(speed/9,1));
+  const desiredTurn=turn*(.9+.48*Math.min(speed/9,1));
+  racer.turnRate=(racer.turnRate||0)+(desiredTurn-(racer.turnRate||0))*(1-Math.exp(-dt*8));
+  racer.yaw-=racer.turnRate*dt;
   const forwardX=-Math.sin(racer.yaw),forwardZ=-Math.cos(racer.yaw);
   const along=racer.vx*forwardX+racer.vz*forwardZ;
   const grip=Math.exp(-dt*(throttle<0?4.8:3.45));
@@ -64,6 +56,12 @@ function driveSledStep(racer,turn,throttle,dt){
   }
   racer.x+=racer.vx*dt;racer.z+=racer.vz*dt;
   const radial=Math.hypot(racer.x,racer.z);
+  if(hollow&&radial<sledInner+.57&&radial>.001){
+    const nx=racer.x/radial,nz=racer.z/radial;
+    const inward=Math.min(0,racer.vx*nx+racer.vz*nz);
+    racer.x=nx*(sledInner+.57);racer.z=nz*(sledInner+.57);
+    racer.vx-=inward*nx;racer.vz-=inward*nz;
+  }
   if(radial>sledOuter-.63){
     const nx=racer.x/radial,nz=racer.z/radial;
     const outward=Math.max(0,racer.vx*nx+racer.vz*nz);
@@ -100,24 +98,28 @@ export function advanceSled(match,now){
     }
     if(match.phase==='ended')return match;
     if(match.phase==='lap'){
-      for(const r of match.racers.filter(r=>r.alive)){
-        driveLap(r,at-match.start);
-      }
       if(at>=match.deadline){
         match.phase='rush';match.start=at;match.deadline=at+sledRush;
       }
-      continue;
     }
-    if(at>=match.deadline){finishSledHeat(match,at);continue}
+    if(match.phase==='rush'&&at>=match.deadline){finishSledHeat(match,at);continue}
     for(const r of match.racers.filter(r=>r.alive)){
       const steer=at-r.inputAt<380;
-      driveSled(r,steer?r.ax:0,steer?-r.az:0,sledStep/1000);
-      if(!r.gift)continue;
-      const target=match.receivers.find(q=>!q.claim&&Math.hypot(q.x-r.x,q.z-r.z)<1.36);
-      if(target){target.claim=r.id;r.gift=false}
+      driveSled(r,steer?r.ax:0,steer?-r.az:0,sledStep/1000,match.phase==='lap');
     }
   }
   return match;
+}
+export function deliverSledGift(match,id){
+  if(match.phase!=='rush')return 'The ice has to freeze first.';
+  const racer=match.racers.find(p=>p.id===id&&p.alive);
+  if(!racer?.gift)return 'You have no gift to deliver.';
+  const receiver=match.receivers.filter(q=>!q.claim&&Math.hypot(q.x-racer.x,q.z-racer.z)<2.15)
+    .sort((a,b)=>Math.hypot(a.x-racer.x,a.z-racer.z)-Math.hypot(b.x-racer.x,b.z-racer.z))[0];
+  if(!receiver)return 'Get closer to an open green receiver.';
+  receiver.claim=id;
+  racer.gift=false;
+  return null;
 }
 export function steerSled(match,id,x,z,now){
   const racer=match.racers.find(r=>r.id===id&&r.alive);
