@@ -41,26 +41,30 @@ export function driveLap(racer,elapsed){
   racer.vz=sledLane*rate*1000*Math.cos(angle);
 }
 
-// Shared by the server and the local driver view. Handoffs and damage stay server-side.
+// Ice Boat's steering, drift and braking, with a speed limit for this smaller arena.
 export function driveSled(racer,turn,throttle,dt){
+  const steps=Math.max(1,Math.ceil(dt*120));
+  for(let i=0;i<steps;i++)driveSledStep(racer,turn,throttle,dt/steps);
+}
+function driveSledStep(racer,turn,throttle,dt){
   const speed=Math.hypot(racer.vx,racer.vz);
-  racer.yaw-=turn*dt*(1.85+Math.min(speed,14)*.065);
+  racer.yaw-=turn*dt*(.6+Math.min(speed/10,1)*1.3);
   const forwardX=-Math.sin(racer.yaw),forwardZ=-Math.cos(racer.yaw);
   const along=racer.vx*forwardX+racer.vz*forwardZ;
-  const grip=Math.exp(-3.3*dt);
-  const drag=Math.exp(-(throttle<0?5.8:throttle>0?.38:.9)*dt);
-  const acceleration=throttle>0?19:throttle<0&&Math.abs(along)<3?-6:0;
+  const grip=1-Math.min(1,dt*.7);
+  const drag=Math.exp(-dt*(throttle<0?2.6:0));
+  const acceleration=throttle>1?38:throttle>0?15:throttle<0&&along<2?-5:0;
   racer.vx=((racer.vx-along*forwardX)*grip+along*forwardX)*drag+forwardX*acceleration*dt;
   racer.vz=((racer.vz-along*forwardZ)*grip+along*forwardZ)*drag+forwardZ*acceleration*dt;
   const nextSpeed=Math.hypot(racer.vx,racer.vz);
-  if(nextSpeed>16){racer.vx*=16/nextSpeed;racer.vz*=16/nextSpeed}
+  if(nextSpeed>29){racer.vx*=29/nextSpeed;racer.vz*=29/nextSpeed}
   racer.x+=racer.vx*dt;racer.z+=racer.vz*dt;
   const radial=Math.hypot(racer.x,racer.z);
   if(radial>sledOuter-.63){
     const nx=racer.x/radial,nz=racer.z/radial;
     const outward=Math.max(0,racer.vx*nx+racer.vz*nz);
     racer.x=nx*(sledOuter-.63);racer.z=nz*(sledOuter-.63);
-    racer.vx-=1.24*outward*nx;racer.vz-=1.24*outward*nz;
+    racer.vx-=1.85*outward*nx;racer.vz-=1.85*outward*nz;
   }
 }
 function finishSledHeat(match,at){
@@ -115,7 +119,7 @@ export function steerSled(match,id,x,z,now){
   const racer=match.racers.find(r=>r.id===id&&r.alive);
   if(!racer)return;
   racer.ax=Number.isFinite(x)?Math.max(-1,Math.min(1,x)):0;
-  racer.az=Number.isFinite(z)?Math.max(-1,Math.min(1,z)):0;
+  racer.az=Number.isFinite(z)?Math.max(-2,Math.min(1,z)):0;
   racer.inputAt=now;
 }
 export function removeSledRacer(match,id){

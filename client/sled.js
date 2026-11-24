@@ -1,5 +1,5 @@
 import * as T from './three.module.js';
-import {sledOuter,sledInner,sledRadius,sledBlast,driveLap,driveSled} from './sled-rules.js?v=13';
+import {sledOuter,sledInner,sledRadius,sledBlast,driveLap,driveSled} from './sled-rules.js?v=14';
 
 export function makeSledArena(makeAvatar){
   const scene=new T.Scene();
@@ -105,6 +105,18 @@ export function makeSledArena(makeAvatar){
   }
   scene.add(landscape);
   const sleds=new Map();
+  // Each horizontal strip of the existing PNG is mapped onto a seated silhouette.
+  const seatedPortrait=new T.PlaneGeometry(1.46,2.02,1,20);
+  const points=seatedPortrait.attributes.position;
+  for(let i=0;i<points.count;i++){
+    const t=(points.getY(i)+1.01)/2.02;
+    const y=t<.22?.05+t*1.75:t<.49?.435+(t-.22)*.32:.521+(t-.49)*1.84;
+    const z=t<.22?.86+t*.55:t<.49?.981-(t-.22)*3.26:.1;
+    points.setY(i,y);
+    points.setZ(i,z);
+  }
+  seatedPortrait.computeVertexNormals();
+  seatedPortrait.computeBoundingSphere();
   function gift(parent,x,y,z){
     const present=new T.Group();
     present.position.set(x,y,z);parent.add(present);
@@ -115,15 +127,21 @@ export function makeSledArena(makeAvatar){
   }
   function rider(id,local){
     const root=new T.Group();scene.add(root);
-    box(1.16,.21,1.91,local?'#b44c58':'#294c65',root,0,.26);
+    box(1.16,.21,2.48,local?'#b44c58':'#294c65',root,0,.26,-.16);
+    box(.8,.19,.53,'#22384a',root,0,.44,.29);
+    box(.8,.47,.13,'#22384a',root,0,.65,.53);
+    for(const x of [-.51,.51])box(.09,.18,1.49,'#698fa6',root,x,.43,-.25);
     for(const x of [-.43,.43]){
-      box(.13,.12,2.07,'#d1eaf7',root,x,.06);
+      box(.13,.12,2.58,'#d1eaf7',root,x,.06,-.16);
       box(.15,.27,.13,'#84b0c6',root,x,.17,-.65);
       box(.15,.27,.13,'#84b0c6',root,x,.17,.65);
     }
     const avatar=makeAvatar(id);
-    avatar.position.set(0,.38,.24);avatar.scale.setScalar(1.04);root.add(avatar);
-    const parcel=gift(root,0,.37,-.57);
+    avatar.children[0].geometry=seatedPortrait;
+    avatar.children[0].position.y=0;
+    avatar.position.set(0,.29,.25);
+    root.add(avatar);
+    const parcel=gift(root,0,.37,-.99);
     const entry={root,parcel,avatar};
     sleds.set(id,entry);return entry;
   }
@@ -148,34 +166,49 @@ export function makeSledArena(makeAvatar){
     });
   }
   let predicted=null,receivedTick=-1,driveKey='',lastCameraId='';
+  const correction={x:0,z:0,yaw:0,vx:0,vz:0};
+  const inputHistory=[];
+  function resetCorrection(){
+    correction.x=correction.z=correction.yaw=correction.vx=correction.vz=0;
+    inputHistory.length=0;
+  }
   function reconcile(match,racer,input,serverNow,dt){
     const key=match.heat+':'+match.phase+':'+racer.id;
     if(key!==driveKey){
-      driveKey=key;predicted={...racer};receivedTick=-1;
+      driveKey=key;predicted={...racer};receivedTick=-1;resetCorrection();
     }
     if(match.phase==='lap'){
       driveLap(predicted,Math.min(match.deadline,serverNow)-match.start);
       return predicted;
     }
     if(match.phase!=='rush')return predicted;
+    const lastInput=inputHistory.at(-1);
+    if(!lastInput||lastInput.ax!==input.ax||lastInput.az!==input.az)inputHistory.push({...input,time:serverNow});
+    while(inputHistory.length>1&&inputHistory[1].time<serverNow-850)inputHistory.shift();
     driveSled(predicted,input.ax,-input.az,dt);
     if(receivedTick!==match.tick){
       receivedTick=match.tick;
-      const correction={...racer};
-      const elapsed=Math.max(0,Math.min(.32,(serverNow-match.tick)/1000));
-      for(let offset=0;offset<elapsed;offset+=.016){
-        driveSled(correction,input.ax,-input.az,Math.min(.016,elapsed-offset));
+      const replay={...racer};
+      const begin=Math.max(match.tick,serverNow-400);
+      let cursor=begin;
+      let applied={ax:racer.ax,az:racer.az};
+      for(const sample of inputHistory){
+        if(sample.time<=begin){applied=sample;continue}
+        if(sample.time>serverNow)break;
+        driveSled(replay,applied.ax,-applied.az,(sample.time-cursor)/1000);
+        cursor=sample.time;
+        applied=sample;
       }
-      const gap=Math.hypot(predicted.x-correction.x,predicted.z-correction.z);
-      if(gap>3)Object.assign(predicted,correction);
-      else{
-        const turn=correction.yaw-predicted.yaw;
-        predicted.yaw+=Math.atan2(Math.sin(turn),Math.cos(turn))*.22;
-        predicted.x+=(correction.x-predicted.x)*.27;
-        predicted.z+=(correction.z-predicted.z)*.27;
-        predicted.vx+=(correction.vx-predicted.vx)*.26;
-        predicted.vz+=(correction.vz-predicted.vz)*.26;
-      }
+      driveSled(replay,applied.ax,-applied.az,Math.max(0,(serverNow-cursor)/1000));
+      const yawError=replay.yaw-predicted.yaw;
+      correction.yaw=Math.atan2(Math.sin(yawError),Math.cos(yawError));
+      for(const axis of ['x','z','vx','vz'])correction[axis]=replay[axis]-predicted[axis];
+    }
+    const blend=1-Math.exp(-dt*7);
+    for(const axis of ['x','z','yaw','vx','vz']){
+      const move=correction[axis]*blend;
+      predicted[axis]+=move;
+      correction[axis]-=move;
     }
     return predicted;
   }
@@ -228,12 +261,17 @@ export function makeSledArena(makeAvatar){
       model.visible=match.phase==='blast';
     }
     if(pose){
-      const spectator=observer.id!==self;
-      const blend=spectator&&lastCameraId===observer.id?1-Math.exp(-dt*14):1;
-      camera.position.lerp(translation.set(pose.x,1.6,pose.z),blend);
+      const driverChanged=lastCameraId!==observer.id;
+      const blend=driverChanged?1:1-Math.exp(-dt*23);
+      const forwardX=-Math.sin(pose.yaw),forwardZ=-Math.cos(pose.yaw);
+      camera.position.lerp(translation.set(pose.x+forwardX*.17,1.55,pose.z+forwardZ*.17),blend);
       const turn=pose.yaw-camera.rotation.y;
       camera.rotation.y+=Math.atan2(Math.sin(turn),Math.cos(turn))*blend;
       camera.rotation.x=-.115;
+      camera.rotation.z+=(.045*input.ax-camera.rotation.z)*(1-Math.exp(-dt*6));
+      const fieldOfView=input.az<-1?83:78;
+      const fov=camera.fov+(fieldOfView-camera.fov)*(1-Math.exp(-dt*4));
+      if(Math.abs(fov-camera.fov)>.005){camera.fov=fov;camera.updateProjectionMatrix()}
       lastCameraId=observer.id;
     }
     renderer.render(scene,camera);
