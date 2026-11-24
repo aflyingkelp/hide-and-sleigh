@@ -41,30 +41,34 @@ export function driveLap(racer,elapsed){
   racer.vz=sledLane*rate*1000*Math.cos(angle);
 }
 
-// Ice Boat's steering, drift and braking, with a speed limit for this smaller arena.
+// The small rink favors controllable turns with a little ice drift.
 export function driveSled(racer,turn,throttle,dt){
   const steps=Math.max(1,Math.ceil(dt*120));
   for(let i=0;i<steps;i++)driveSledStep(racer,turn,throttle,dt/steps);
 }
 function driveSledStep(racer,turn,throttle,dt){
   const speed=Math.hypot(racer.vx,racer.vz);
-  racer.yaw-=turn*dt*(.6+Math.min(speed/10,1)*1.3);
+  racer.yaw-=turn*dt*(1.15+.67*Math.min(speed/9,1));
   const forwardX=-Math.sin(racer.yaw),forwardZ=-Math.cos(racer.yaw);
   const along=racer.vx*forwardX+racer.vz*forwardZ;
-  const grip=1-Math.min(1,dt*.7);
-  const drag=Math.exp(-dt*(throttle<0?2.6:0));
-  const acceleration=throttle>1?38:throttle>0?15:throttle<0&&along<2?-5:0;
+  const grip=Math.exp(-dt*(throttle<0?4.8:3.45));
+  const drag=Math.exp(-dt*(throttle<0&&along>.85?5:throttle===0?1.15:.35));
+  const acceleration=throttle>1?21:throttle>0?17:throttle<0&&along<.85?-5:0;
   racer.vx=((racer.vx-along*forwardX)*grip+along*forwardX)*drag+forwardX*acceleration*dt;
   racer.vz=((racer.vz-along*forwardZ)*grip+along*forwardZ)*drag+forwardZ*acceleration*dt;
   const nextSpeed=Math.hypot(racer.vx,racer.vz);
-  if(nextSpeed>29){racer.vx*=29/nextSpeed;racer.vz*=29/nextSpeed}
+  const limit=throttle>1?17.5:throttle<0&&along<0?5.5:13.5;
+  if(nextSpeed>limit){
+    const speed=limit+(nextSpeed-limit)*Math.exp(-dt*26);
+    racer.vx*=speed/nextSpeed;racer.vz*=speed/nextSpeed;
+  }
   racer.x+=racer.vx*dt;racer.z+=racer.vz*dt;
   const radial=Math.hypot(racer.x,racer.z);
   if(radial>sledOuter-.63){
     const nx=racer.x/radial,nz=racer.z/radial;
     const outward=Math.max(0,racer.vx*nx+racer.vz*nz);
     racer.x=nx*(sledOuter-.63);racer.z=nz*(sledOuter-.63);
-    racer.vx-=1.85*outward*nx;racer.vz-=1.85*outward*nz;
+    racer.vx-=1.04*outward*nx;racer.vz-=1.04*outward*nz;
   }
 }
 function finishSledHeat(match,at){

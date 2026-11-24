@@ -1,5 +1,5 @@
 import * as T from './three.module.js';
-import {sledOuter,sledInner,sledRadius,sledBlast,driveLap,driveSled} from './sled-rules.js?v=14';
+import {sledOuter,sledInner,sledRadius,sledBlast,driveLap,driveSled} from './sled-rules.js?v=15';
 
 export function makeSledArena(makeAvatar){
   const scene=new T.Scene();
@@ -8,8 +8,9 @@ export function makeSledArena(makeAvatar){
   scene.add(new T.HemisphereLight(0xd4f4ff,0x577399,1.65));
   const sky=new T.DirectionalLight(0xd1eaff,1.8);
   sky.position.set(-18,24,16);scene.add(sky);
-  const camera=new T.PerspectiveCamera(78,innerWidth/innerHeight,.055,190);
+  const camera=new T.PerspectiveCamera(74,innerWidth/innerHeight,.055,190);
   camera.rotation.order='YXZ';
+  scene.add(camera);
   const materials=new Map();
   const solid=color=>{
     if(!materials.has(color))materials.set(color,new T.MeshStandardMaterial({color,roughness:.82}));
@@ -29,10 +30,40 @@ export function makeSledArena(makeAvatar){
     const item=mesh(geometry,material,parent,0,y,0);
     item.rotation.x=-Math.PI/2;return item;
   }
+  function iceTexture(){
+    const canvas=document.createElement('canvas');
+    canvas.width=canvas.height=512;
+    const ctx=canvas.getContext('2d');
+    let seed=7851;
+    const random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296};
+    const image=ctx.createImageData(512,512);
+    for(let i=0;i<image.data.length;i+=4){
+      const grain=222+Math.floor(random()*32);
+      image.data[i]=grain-15;image.data[i+1]=grain-5;image.data[i+2]=grain;image.data[i+3]=255;
+    }
+    ctx.putImageData(image,0,0);
+    for(let i=0;i<410;i++){
+      const x=random()*512,y=random()*512;
+      ctx.strokeStyle=i%3?'rgba(253,255,255,.20)':'rgba(94,153,180,.22)';
+      ctx.lineWidth=.4+random()*1.15;
+      ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+7+random()*25,y-3+random()*6);ctx.stroke();
+    }
+    const texture=new T.CanvasTexture(canvas);
+    texture.colorSpace=T.SRGBColorSpace;
+    texture.wrapS=texture.wrapT=T.RepeatWrapping;
+    texture.anisotropy=4;
+    return texture;
+  }
+  const iceMap=iceTexture();
+  function iceDisc(geometry,color){
+    const vertices=geometry.attributes.position, uv=geometry.attributes.uv;
+    for(let i=0;i<vertices.count;i++)uv.setXY(i,vertices.getX(i)/7,vertices.getY(i)/7);
+    return disc(geometry,new T.MeshStandardMaterial({color,map:iceMap,roughness:.76}),scene,0);
+  }
   disc(new T.CircleGeometry(155,64),solid('#98b1c6'),scene,-1.05);
   disc(new T.CircleGeometry(sledOuter+2,80),solid('#173247'),scene,-.88);
-  disc(new T.RingGeometry(sledInner,sledOuter,80),solid('#75a9be'),scene,0);
-  const center=disc(new T.CircleGeometry(sledInner+.02,80),solid('#507e9c'),scene,0);
+  iceDisc(new T.RingGeometry(sledInner,sledOuter,80),'#75a6ba');
+  const center=iceDisc(new T.CircleGeometry(sledInner+.02,80),'#668fa6');
   const freezeLines=new T.Group();scene.add(freezeLines);
   for(let i=0;i<15;i++){
     const a=i*2.399, r=2+(i%5)*1.49;
@@ -125,6 +156,11 @@ export function makeSledArena(makeAvatar){
     box(.63,.06,.14,'#ffcf6e',present,0,.51);
     return present;
   }
+  // The visible nose is attached to the camera so it cannot swing during reconciliation.
+  const cockpit=new T.Group();camera.add(cockpit);
+  box(1.05,.19,.98,'#a14251',cockpit,0,-1.04,-1.02);
+  for(const x of [-.48,.48])box(.1,.15,.9,'#b7d2e0',cockpit,x,-.91,-.99);
+  const cabinGift=gift(cockpit,0,-.93,-1.34);
   function rider(id,local){
     const root=new T.Group();scene.add(root);
     box(1.16,.21,2.48,local?'#b44c58':'#294c65',root,0,.26,-.16);
@@ -239,7 +275,7 @@ export function makeSledArena(makeAvatar){
       entry.root.position.z+=(r.z+r.vz*drift-entry.root.position.z)*alpha;
       const turn=r.yaw-entry.root.rotation.y;
       entry.root.rotation.y+=Math.atan2(Math.sin(turn),Math.cos(turn))*alpha;
-      entry.root.visible=r.alive;
+      entry.root.visible=r.alive&&r.id!==observer?.id;
       entry.parcel.visible=r.gift&&!inBlast;
       entry.avatar.visible=r.id!==observer?.id;
       if(pose&&r.id===observer.id){
@@ -262,18 +298,16 @@ export function makeSledArena(makeAvatar){
     }
     if(pose){
       const driverChanged=lastCameraId!==observer.id;
-      const blend=driverChanged?1:1-Math.exp(-dt*23);
+      const blend=driverChanged?1:1-Math.exp(-dt*24);
       const forwardX=-Math.sin(pose.yaw),forwardZ=-Math.cos(pose.yaw);
       camera.position.lerp(translation.set(pose.x+forwardX*.17,1.55,pose.z+forwardZ*.17),blend);
       const turn=pose.yaw-camera.rotation.y;
       camera.rotation.y+=Math.atan2(Math.sin(turn),Math.cos(turn))*blend;
-      camera.rotation.x=-.115;
-      camera.rotation.z+=(.045*input.ax-camera.rotation.z)*(1-Math.exp(-dt*6));
-      const fieldOfView=input.az<-1?83:78;
-      const fov=camera.fov+(fieldOfView-camera.fov)*(1-Math.exp(-dt*4));
-      if(Math.abs(fov-camera.fov)>.005){camera.fov=fov;camera.updateProjectionMatrix()}
+      camera.rotation.x=-.1;
       lastCameraId=observer.id;
     }
+    cockpit.visible=!!observer&&!inBlast;
+    cabinGift.visible=!!observer?.gift;
     renderer.render(scene,camera);
     if(!pose)return null;
     const target=match.phase==='rush'&&observer.gift&&match.receivers
