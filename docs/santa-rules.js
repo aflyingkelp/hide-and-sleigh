@@ -33,8 +33,10 @@ function santaClear(a,b){
 }
 export function newSantaMatch(ids,now){
   const spawn=santaCenter(1,1);
+  const [forwardX,forwardZ]=santaMoves.find(([dx,dz])=>santaMaze[1+dz][1+dx]===0);
+  const spawnYaw=Math.atan2(-forwardX,-forwardZ);
   return {type:'santa',phase:'running',start:now,tick:now,deadline:now+santaLimit,winner:null,santa:santaCenter(11,5),fuses:santaFuses.map(p=>({...p,found:false})),
-    racers:ids.map((id,i)=>({id,x:spawn.x+(i%3-1)*.58,z:spawn.z+(Math.floor(i/3)-1)*.55,yaw:Math.PI,alive:true,escaped:false,seen:now,score:0}))};
+    racers:ids.map((id,i)=>({id,x:spawn.x+(i%3-1)*.58,z:spawn.z+(Math.floor(i/3)-1)*.55,yaw:spawnYaw,alive:true,escaped:false,seen:now,score:0}))};
 }
 function santaRoute(match){
   const players=match.racers.filter(p=>p.alive&&!p.escaped);

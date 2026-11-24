@@ -1,7 +1,7 @@
 import * as T from './three.module.js';
 import {boxes,props,buildings,trees,lamps,TYPES,blocked,spawn,rocketCooldown,tauntNames,trapBeats,trapWindow,trapDuration} from './world.js';
 import {makeSledArena} from './sled.js?v=16';
-import {makeSantaMaze} from './santa.js?v=16';
+import {makeSantaMaze} from './santa.js?v=17';
 const $=id=>document.getElementById(id),scene=new T.Scene();scene.background=new T.Color('#010205');scene.fog=new T.FogExp2('#010205',.023);
 const renderer=new T.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,1.6));renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;renderer.shadowMap.type=T.PCFSoftShadowMap;renderer.outputColorSpace=T.SRGBColorSpace;document.body.prepend(renderer.domElement);
 const camera=new T.PerspectiveCamera(76,innerWidth/innerHeight,.055,135);camera.rotation.order='YXZ';scene.add(camera);scene.add(new T.HemisphereLight(0x7196c8,0x2b3449,.105));const moon=new T.DirectionalLight(0x8ba9d9,.13);moon.position.set(-30,70,20);scene.add(moon);
@@ -577,7 +577,8 @@ function receivedSanta(next){
     setWheel(false,false);
     setActiveTrap(null);
     paused=false;
-    yaw=Math.PI;pitch=0;santaFlash=true;
+    yaw=game.racers.find(p=>p.id===session.id)?.yaw??Math.PI;
+    pitch=0;santaFlash=true;
     $('paused').style.display='none';
     $('lobby').style.display='none';
     for(const id of hideHud)$(id).classList.add('hidden');

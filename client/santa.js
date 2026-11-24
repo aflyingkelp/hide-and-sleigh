@@ -1,5 +1,5 @@
 import * as T from './three.module.js';
-import {santaMaze,santaCellSize,santaExit,santaBlocked} from './santa-rules.js?v=16';
+import {santaMaze,santaCellSize,santaExit,santaBlocked} from './santa-rules.js?v=17';
 
 export function makeSantaMaze(makeAvatar){
   const scene=new T.Scene();
@@ -38,7 +38,7 @@ export function makeSantaMaze(makeAvatar){
     items.forEach(([x,y,z,w,h,d],i)=>{matrix.makeScale(w,h,d);matrix.setPosition(x,y,z);batch.setMatrixAt(i,matrix)});
     scene.add(batch);
   }
-  const light=new T.SpotLight(0xffe5ca,27,18,Math.PI/5,.4,1.5);
+  const light=new T.SpotLight(0xffe5ca,15,18,Math.PI/5,.45,1.6);
   light.position.set(.18,-.15,-.28);
   light.target.position.set(0,0,-10);
   camera.add(light,light.target);
