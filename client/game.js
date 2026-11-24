@@ -1,7 +1,7 @@
 import * as T from './three.module.js';
 import {boxes,props,buildings,trees,lamps,TYPES,blocked,spawn,rocketCooldown,tauntNames,trapBeats,trapWindow,trapDuration} from './world.js';
 import {makeSledArena} from './sled.js?v=16';
-import {makeSantaMaze} from './santa.js?v=17';
+import {makeSantaMaze} from './santa.js?v=18';
 const $=id=>document.getElementById(id),scene=new T.Scene();scene.background=new T.Color('#010205');scene.fog=new T.FogExp2('#010205',.023);
 const renderer=new T.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,1.6));renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;renderer.shadowMap.type=T.PCFSoftShadowMap;renderer.outputColorSpace=T.SRGBColorSpace;document.body.prepend(renderer.domElement);
 const camera=new T.PerspectiveCamera(76,innerWidth/innerHeight,.055,135);camera.rotation.order='YXZ';scene.add(camera);scene.add(new T.HemisphereLight(0x7196c8,0x2b3449,.105));const moon=new T.DirectionalLight(0x8ba9d9,.13);moon.position.set(-30,70,20);scene.add(moon);
@@ -258,7 +258,7 @@ function toggleCling(){
 $('mobileCopy').onclick=()=>copy();$('mobileTag').onclick=fireRocket;$('mobileCling').onclick=toggleCling;$('mobileLight').onclick=()=>{if(localProp<0)lightOn=!lightOn};
 viewCanvas.addEventListener('click',()=>{
   if(state?.sled){deliverGift();return}
-  if(state?.santa){if(!sledLobbyOpen)lock();return}
+  if(state?.santa){if(!sledLobbyOpen&&!openSantaTask)lock();return}
   if(paused||wheelOpen||activeTrap)return;
   lock();
   if(seeker())fireRocket();
@@ -299,7 +299,7 @@ function applyMouseLook(dt){
   yaw-=dx*.0023;
   pitch=T.MathUtils.clamp(pitch-dy*.0023,-1.25,1.25);
 }
-addEventListener('keydown',e=>{if(['INPUT','SELECT'].includes(document.activeElement?.tagName))return;const k=e.key.toLowerCase();keys[k]=true;if(['w','a','s','d',' ','arrowup','arrowdown','arrowleft','arrowright'].includes(k))e.preventDefault();if(e.repeat)return;if(state?.sled||state?.santa){if(k==='escape')sledLobbyToggle();if(k==='f'){if(state.sled)deliverGift();else santaFlash=!santaFlash}return}if(activeTrap){if(k===' ')tapTrap();return}if(wheelOpen){if(k==='escape'||k==='t')setWheel(false);else if(/^[1-8]$/.test(k))sendTaunt(Number(k)-1);return}if(k==='t'){setWheel(true);return}if(k==='b'){placeTrap();return}if(k==='e')copy();if(k==='x')copy(true);if(k==='f'&&localProp<0&&!caught())lightOn=!lightOn;if(k==='c')crouch=!crouch;if(k==='m')mapOpen=!mapOpen;if(k===' ')fireRocket();if(k==='g')toggleCling();if(k==='shift'&&clinging)clinging=false;if(k==='escape'&&active()&&!paused)$('roomButton').click()});addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);addEventListener('blur',()=>{keys={};resetLook()});
+addEventListener('keydown',e=>{if(openSantaTask){if(e.key==='Escape'){e.preventDefault();closeSantaTask()}return}if(['INPUT','SELECT'].includes(document.activeElement?.tagName))return;const k=e.key.toLowerCase();keys[k]=true;if(['w','a','s','d',' ','arrowup','arrowdown','arrowleft','arrowright'].includes(k))e.preventDefault();if(e.repeat)return;if(state?.sled||state?.santa){if(k==='escape')sledLobbyToggle();if(k==='e'&&state.santa)openTask();if(k==='f'){if(state.sled)deliverGift();else santaFlash=!santaFlash}return}if(activeTrap){if(k===' ')tapTrap();return}if(wheelOpen){if(k==='escape'||k==='t')setWheel(false);else if(/^[1-8]$/.test(k))sendTaunt(Number(k)-1);return}if(k==='t'){setWheel(true);return}if(k==='b'){placeTrap();return}if(k==='e')copy();if(k==='x')copy(true);if(k==='f'&&localProp<0&&!caught())lightOn=!lightOn;if(k==='c')crouch=!crouch;if(k==='m')mapOpen=!mapOpen;if(k===' ')fireRocket();if(k==='g')toggleCling();if(k==='shift'&&clinging)clinging=false;if(k==='escape'&&active()&&!paused)$('roomButton').click()});addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);addEventListener('blur',()=>{keys={};resetLook()});
 document.querySelectorAll('[data-key]').forEach(b=>{b.onpointerdown=e=>{keys[b.dataset.key]=true;b.setPointerCapture(e.pointerId)};b.onpointerup=b.onpointercancel=()=>keys[b.dataset.key]=false});
 const JINGLE_RANGE=50;
 let jingleSignal=null;
@@ -554,6 +554,127 @@ let sledNotice='',sledNoticeUntil=0,deliveryBusy=false;
 let sledPhase=null;
 let sledLobbyOpen=false;
 const hideHud=['hud','crosshair','target','jingleMeter','equipment','bottom','mobile','map','blackout'];
+let nearbySantaTask=null,openSantaTask=null,santaTaskSerial=0,santaAmbience=null;
+let santaScoreNotice='',santaScoreUntil=0;
+function setSantaAmbience(distance,enabled){
+  if(!audio)return;
+  if(!santaAmbience&&enabled&&audio.state==='running'){
+    const channel=audio.createGain();
+    channel.gain.value=0;
+    const noise=audio.createBufferSource();
+    const buffer=audio.createBuffer(1,audio.sampleRate*2,audio.sampleRate);
+    const samples=buffer.getChannelData(0);
+    for(let i=0;i<samples.length;i++)samples[i]=Math.random()*2-1;
+    noise.buffer=buffer;
+    noise.loop=true;
+    const filter=audio.createBiquadFilter();
+    filter.type='lowpass';filter.frequency.value=210;
+    const tone=audio.createOscillator();
+    tone.type='triangle';tone.frequency.value=39;
+    const toneLevel=audio.createGain();toneLevel.gain.value=.3;
+    noise.connect(filter).connect(channel).connect(audio.destination);
+    tone.connect(toneLevel).connect(channel);
+    noise.start();tone.start();
+    santaAmbience={channel,filter};
+  }
+  if(!santaAmbience)return;
+  const proximity=Math.max(0,1-distance/17);
+  const time=audio.currentTime;
+  santaAmbience.channel.gain.setTargetAtTime(enabled?.022+.32*proximity**1.7:0,time,.19);
+  santaAmbience.filter.frequency.setTargetAtTime(170+proximity*680,time,.19);
+}
+function closeSantaTask(){
+  openSantaTask=null;
+  santaTaskSerial++;
+  $('santaTaskOverlay').classList.add('hidden');
+}
+function santaTaskVisible(){
+  return state?.santa?.phase==='running'&&!sledLobbyOpen&&state.santa.racers.find(p=>p.id===session?.id)?.alive;
+}
+function openTask(){
+  const task=nearbySantaTask;
+  if(!task||openSantaTask||!santaTaskVisible())return;
+  initAudio();
+  release();
+  const attempt={task,answer:[],selected:new Set(),busy:false};
+  openSantaTask=attempt;
+  const serial=++santaTaskSerial;
+  $('santaTaskTitle').textContent=task.title;
+  $('santaTaskPrompt').textContent=task.prompt;
+  $('santaTaskFeedback').textContent='';
+  $('santaTaskOverlay').classList.remove('hidden');
+  const actions=$('santaTaskActions');
+  actions.replaceChildren();
+  const submit=$('santaTaskSubmit');
+  submit.disabled=false;
+  const progress=document.createElement('p');
+  if(task.kind==='dial'){
+    const [min,max,step]=task.extra;
+    const label=document.createElement('label');
+    const value=document.createElement('output');
+    const dial=document.createElement('input');
+    dial.type='range';dial.min=min;dial.max=max;dial.step=step;dial.value=min;
+    label.textContent=task.options[0];
+    label.append(dial,value);actions.append(label);
+    dial.oninput=()=>{value.textContent=dial.value;attempt.answer=[Number(dial.value)]};
+    dial.oninput();
+  }else if(task.kind==='wire'){
+    task.options.forEach((name,i)=>{
+      const row=document.createElement('label'),select=document.createElement('select');
+      row.textContent=name;select.append(new Option('Choose a match',''));
+      task.extra.forEach((label,index)=>select.append(new Option(label,index)));
+      select.onchange=()=>attempt.answer[i]=select.value===''?null:Number(select.value);
+      row.append(select);actions.append(row);
+    });
+  }else{
+    const options=document.createElement('div');options.className='santa-options';
+    for(const [index,label] of task.options.entries()){
+      const button=document.createElement('button');
+      button.textContent=label;
+      button.onclick=()=>{
+        if(task.kind==='toggle'){
+          if(attempt.selected.has(index))attempt.selected.delete(index);else attempt.selected.add(index);
+          button.setAttribute('aria-pressed',attempt.selected.has(index));
+          attempt.answer=[...attempt.selected];
+        }else if(attempt.answer.length<task.answer.length){
+          attempt.answer.push(index);
+          if(task.kind==='order')button.disabled=true;
+        }
+        progress.textContent=attempt.answer.map(i=>task.options[i]).join(' · ');
+      };
+      options.append(button);
+    }
+    actions.append(options,progress);
+    if(task.kind==='memory'){
+      options.hidden=true;submit.disabled=true;
+      progress.textContent=task.answer.map(i=>task.options[i]).join(' · ');
+      setTimeout(()=>{
+        if(serial!==santaTaskSerial)return;
+        options.hidden=false;submit.disabled=false;
+        progress.textContent='Enter the pattern from memory.';
+      },2200);
+    }
+  }
+}
+$('santaTaskSubmit').onclick=async()=>{
+  const attempt=openSantaTask;
+  if(!attempt||attempt.busy)return;
+  attempt.busy=true;
+  $('santaTaskSubmit').disabled=true;
+  try{
+    await post('santa-task',{task:attempt.task.id,answer:attempt.answer});
+    if(openSantaTask===attempt)closeSantaTask();
+    santaScoreNotice='+1 · '+attempt.task.title;
+    santaScoreUntil=performance.now()+2200;
+    sound(720,.18,.05);
+    sync();
+  }catch(error){
+    if(openSantaTask===attempt){$('santaTaskFeedback').textContent=error.message;attempt.busy=false;$('santaTaskSubmit').disabled=false}
+  }
+};
+$('santaTaskReset').onclick=()=>{closeSantaTask();openTask()};
+$('santaTaskClose').onclick=closeSantaTask;
+$('santaUseTask').onclick=openTask;
 async function deliverGift(){
   if(state?.sled?.phase!=='rush'||sledLobbyOpen||deliveryBusy)return;
   const self=state.sled.racers.find(p=>p.id===session.id);
@@ -592,20 +713,27 @@ function receivedSanta(next){
 function drawSanta(dt){
   const game=state.santa,self=game.racers.find(p=>p.id===session.id);
   const alive=self?.alive&&!self?.escaped;
-  const moving=alive&&!sledLobbyOpen&&game.phase==='running';
+  const playing=alive&&!sledLobbyOpen&&game.phase==='running';
+  if(!playing&&openSantaTask)closeSantaTask();
+  const moving=playing&&!openSantaTask;
   if(moving){
     applyMouseLook(dt);
     if(keys.q||keys.arrowleft)yaw+=dt*1.6;
     if(keys.r||keys.arrowright)yaw-=dt*1.6;
   }
-  const heard=santaArena.draw(renderer,game,session.id,dt,{yaw,pitch},moving?keys:{},santaFlash);
+  const view=santaArena.draw(renderer,game,session.id,dt,{yaw,pitch},moving?keys:{},santaFlash);
+  const heard=view.distance;
+  nearbySantaTask=view.task;
   const remaining=Math.ceil(Math.max(0,game.deadline-Date.now()-serverOffset)/1000);
-  const fuses=game.fuses.filter(item=>item.found).length;
   $('santaHud').hidden=false;
   $('sledTouch').hidden=!moving;
   $('sledDeliver').hidden=true;
   $('santaTimer').textContent=game.phase==='ended'?'ROUND OVER':remaining+'s';
-  $('santaStatus').textContent=self?.escaped?'Escaped · 10 points':!alive?'Spectating':fuses===game.fuses.length?'Exit unlocked · Find the green door':fuses+' / '+game.fuses.length+' fuses · Stay away from Santa';
+  const score=(self?.score||0)+' / 20 tasks';
+  $('santaStatus').textContent=!alive?score+' · Spectating':performance.now()<santaScoreUntil?santaScoreNotice:score+' · Watch for Santa';
+  $('santaUseTask').hidden=!moving||!nearbySantaTask;
+  if(nearbySantaTask)$('santaUseTask').textContent='E · '+nearbySantaTask.title;
+  setSantaAmbience(heard,playing);
   santaPulse-=dt;
   if(moving&&heard<10&&santaPulse<=0){
     santaPulse=.35+heard*.1;
@@ -623,7 +751,9 @@ function sledInput(){
 }
 function clearSledHud(){
   for(const id of hideHud)$(id).classList.remove('hidden');
-  $('sledHud').hidden=$('sledTouch').hidden=$('sledNav').hidden=$('santaHud').hidden=true;
+  $('sledHud').hidden=$('sledTouch').hidden=$('sledNav').hidden=$('santaHud').hidden=$('santaUseTask').hidden=true;
+  closeSantaTask();
+  setSantaAmbience(0,false);
   santaPhaseKey=null;
   $('roomButton').textContent='Room / Pause';
   sledPhase=null;
@@ -640,7 +770,7 @@ function sledLobbyToggle(){
 function renderSledResults(){
   const match=state.sled||state.santa;
   const winner=state.players.find(p=>p.id===match.winner);
-  $('lobbyInfo').textContent=state.santa?(winner?winner.name+' reached the exit first.':'Nobody escaped the workshop.'):(winner?winner.name+' won Sled Scramble.':'Everybody blew up. No winner.');
+  $('lobbyInfo').textContent=state.santa?(winner?winner.name+' completed the most tasks.':'Tied for most tasks.'):(winner?winner.name+' won Sled Scramble.':'Everybody blew up. No winner.');
   $('roster').replaceChildren();
   for(const racer of [...match.racers].sort((a,b)=>b.score-a.score)){
     const row=document.createElement('div');
@@ -648,7 +778,7 @@ function renderSledResults(){
     const name=document.createElement('span');
     name.textContent=state.players.find(p=>p.id===racer.id)?.name||'Disconnected racer';
     const points=document.createElement('small');
-    points.textContent=racer.score+' / 10';
+    points.textContent=racer.score+(state.santa?' / 20':' / 10');
     row.append(name,points);
     $('roster').append(row);
   }

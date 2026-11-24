@@ -1,5 +1,5 @@
 import * as T from './three.module.js';
-import {santaMaze,santaCellSize,santaExit,santaBlocked} from './santa-rules.js?v=17';
+import {santaMaze,santaCellSize,santaTasks,santaBlocked} from './santa-rules.js?v=18';
 
 export function makeSantaMaze(makeAvatar){
   const scene=new T.Scene();
@@ -46,21 +46,23 @@ export function makeSantaMaze(makeAvatar){
   image.colorSpace=T.SRGBColorSpace;
   const santa=new T.Sprite(new T.SpriteMaterial({map:image,depthTest:true,alphaTest:.4,color:'#ffdfd9'}));
   santa.scale.set(1.5,2.8,1);scene.add(santa);
-  const exit=block(1.1,2.6,.15,'#823845',santaExit.x,1.3,santaExit.z-1.5);
-  const exitGlow=block(.7,.24,.09,'#ff576a',santaExit.x,2.84,santaExit.z-1.47);
-  exitGlow.material=new T.MeshBasicMaterial({color:0xff576a});
+  const readyLight=new T.MeshBasicMaterial({color:0x83edff});
+  const doneLight=new T.MeshBasicMaterial({color:0x57936d});
+  const palette={order:'#937458',toggle:'#66725e',wire:'#705e83',dial:'#6c768e',memory:'#915f65'};
+  const stations=santaTasks.map(task=>{
+    block(.9,.20,.68,palette[task.kind],task.x,.73,task.z);
+    block(.56,.72,.52,'#45323f',task.x,.36,task.z);
+    block(.64,.31,.36,palette[task.kind],task.x,1.0,task.z);
+    const indicator=block(.23,.10,.16,'#72dbed',task.x,1.18,task.z);
+    indicator.material=readyLight;
+    return indicator;
+  });
   const remote=new Map();
-  let fuseMeshes=[],resetKey=null,position={x:0,z:0},started=false;
+  let resetKey=null,position={x:0,z:0},started=false;
   function receive(game,id){
     const self=game.racers.find(p=>p.id===id);
     if(resetKey!==game.start){
       resetKey=game.start;
-      for(const prop of fuseMeshes)scene.remove(prop);
-      fuseMeshes=game.fuses.map(p=>{
-        const prop=block(.28,.44,.27,'#4cf9a6',p.x,.57,p.z);
-        prop.material=new T.MeshBasicMaterial({color:0x77ffb2});
-        return prop;
-      });
       position={x:self?.x??5.7,z:self?.z??5.7};
       santa.position.set(game.santa.x,1.4,game.santa.z);
       started=true;
@@ -68,7 +70,7 @@ export function makeSantaMaze(makeAvatar){
   }
   function draw(renderer,game,id,dt,look,keys,flash){
     const self=game.racers.find(p=>p.id===id);
-    const observer=self?.alive&&!self.escaped?self:game.racers.find(p=>p.alive&&!p.escaped);
+    const observer=self?.alive?self:game.racers.find(p=>p.alive);
     if(observer?.id===id&&started&&game.phase==='running'){
       const moveX=Number(!!keys.d)-Number(!!keys.a),moveZ=Number(!!keys.s)-Number(!!keys.w);
       const step=(keys.shift?6.8:4.8)*dt/Math.max(1,Math.hypot(moveX,moveZ));
@@ -82,12 +84,7 @@ export function makeSantaMaze(makeAvatar){
     camera.rotation.set(observer?.id!==id&&observer?0:look.pitch,observer?.id!==id&&observer?observer.yaw:look.yaw,0);
     if(camera.aspect!==innerWidth/innerHeight){camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix()}
     light.visible=flash;
-    const lamp=game.fuses.every(f=>f.found);
-    exit.material=mat(lamp?'#348462':'#823845');exitGlow.material.color.setHex(lamp?0x55ff9c:0xff576a);
-    for(const [i,fuse] of game.fuses.entries()){
-      fuseMeshes[i].visible=!fuse.found;
-      fuseMeshes[i].rotation.y+=dt*2;
-    }
+    for(const [i,station] of stations.entries())station.material=self?.tasks?.includes(i)?doneLight:readyLight;
     const easing=1-Math.exp(-dt*13);
     santa.position.x+=(game.santa.x-santa.position.x)*easing;
     santa.position.z+=(game.santa.z-santa.position.z)*easing;
@@ -95,14 +92,19 @@ export function makeSantaMaze(makeAvatar){
       if(p.id===id)continue;
       if(!remote.has(p.id)){const art=makeAvatar(p.id);art.position.set(p.x,0,p.z);scene.add(art);remote.set(p.id,art)}
       const art=remote.get(p.id);
-      art.visible=p.alive&&!p.escaped&&p.id!==observer?.id;
+      art.visible=p.alive&&p.id!==observer?.id;
       art.position.x+=(p.x-art.position.x)*easing;
       art.position.z+=(p.z-art.position.z)*easing;
       art.rotation.y=p.yaw;
     }
     for(const [id,art] of remote)if(!game.racers.some(p=>p.id===id)){scene.remove(art);remote.delete(id)}
     renderer.render(scene,camera);
-    return Math.hypot(view.x-game.santa.x,view.z-game.santa.z);
+    let task=null,best=1.72;
+    if(self?.alive)for(const item of santaTasks){
+      const distance=Math.hypot(view.x-item.x,view.z-item.z);
+      if(distance<best&&!self.tasks?.includes(item.id)){best=distance;task=item}
+    }
+    return {distance:Math.hypot(view.x-game.santa.x,view.z-game.santa.z),task};
   }
   return {receive,draw,position:()=>position};
 }

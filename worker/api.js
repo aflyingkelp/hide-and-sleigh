@@ -1,6 +1,6 @@
 import {blocked,clearLine,props,spawn,rocketPath,rocketCooldown,rocketRadius,tauntNames,trapBeats,trapWindow,trapDuration} from '../client/world.js';
 import {newSledMatch,advanceSled,steerSled,removeSledRacer,deliverSledGift} from '../client/sled-rules.js';
-import {newSantaMatch,advanceSanta,updateSantaPlayer} from '../client/santa-rules.js';
+import {newSantaMatch,advanceSanta,updateSantaPlayer,completeSantaTask} from '../client/santa-rules.js';
 const json=(data,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store'}});
 const fail=(message,status=400)=>{throw Object.assign(new Error(message),{status})};
 const publicPlayer=p=>({id:p.id,name:p.name,x:p.x,z:p.z,yaw:p.yaw,pitch:p.pitch,prop:p.prop,caught:!!p.caught,light:!!p.light,rocket:p.rocket?JSON.parse(p.rocket):null,taunt:p.taunt?JSON.parse(p.taunt):null});
@@ -51,7 +51,7 @@ async function roomRequest(request,env){try{
  if(!roster.some(q=>q.id===room.host)){room.host=p.id;await sql('UPDATE rooms SET host=? WHERE code=?',p.id,p.room).run()}
  let phase=room.phase;if(phase==='playing')phase=now<room.starts+20000?'hiding':now<room.starts+200000?'seeking':'ended';
  if(action==='leave'){await sql('DELETE FROM players WHERE id=?',p.id).run();return json({left:true})}
- if(['start-sled','sled-sync','sled-deliver','start-santa','santa-sync','start','sync'].includes(action)){
+ if(['start-sled','sled-sync','sled-deliver','start-santa','santa-sync','santa-task','start','sync'].includes(action)){
   let stored=await sql('SELECT state,version FROM sled_matches WHERE room=?',p.room).first();
   if(action==='start-sled'||action==='start-santa'){
    if(room.host!==p.id)fail('Only the host can start.',403);
@@ -68,16 +68,20 @@ async function roomRequest(request,env){try{
    await sql('DELETE FROM sled_matches WHERE room=? AND version=?',p.room,stored.version).run();
    stored=null;
   }
-  if(stored&&['sync','sled-sync','santa-sync','sled-deliver'].includes(action)){
+  if(stored&&['sync','sled-sync','santa-sync','santa-task','sled-deliver'].includes(action)){
    await sql('UPDATE players SET seen=? WHERE id=?',now,p.id).run();
    const ids=new Set([...roster.map(player=>player.id),p.id]);
-   let game,deliveryError;
+   let game,deliveryError,taskError;
    for(let attempt=0;attempt<8;attempt++){
     game=JSON.parse(stored.state);
-    if(game.phase==='ended'){if(action==='sled-deliver')fail('The heat already ended.',409);break}
+    if(game.phase==='ended'){if(action==='sled-deliver'||action==='santa-task')fail('The round already ended.',409);break}
     if(game.type==='santa'){
      if(action==='santa-sync')updateSantaPlayer(game,p.id,body,now);
      advanceSanta(game,now,ids);
+     if(action==='santa-task'){
+      taskError=completeSantaTask(game,p.id,body.task,body.answer,now);
+      if(!taskError)advanceSanta(game,now,ids);
+     }
     }else{
      for(const racer of game.racers)if(!ids.has(racer.id))removeSledRacer(game,racer.id);
      advanceSled(game,now);
@@ -86,6 +90,10 @@ async function roomRequest(request,env){try{
     }
     const update=await sql('UPDATE sled_matches SET state=?,version=version+1 WHERE room=? AND version=?',JSON.stringify(game),p.room,stored.version).run();
     if(update.meta?.changes??update.changes){
+     if(action==='santa-task'){
+      if(taskError||game.type!=='santa')fail(taskError||'No Santa round is running.',409);
+      return json({completed:true,score:game.racers.find(r=>r.id===p.id).score});
+     }
      if(action==='sled-deliver'){
       if(deliveryError||game.type==='santa')fail(deliveryError||'No sled round is running.',409);
       return json({delivered:true});
@@ -96,11 +104,12 @@ async function roomRequest(request,env){try{
     if(!stored)return json({retry:true});
     game=JSON.parse(stored.state);
    }
-   if(action==='sled-deliver')fail('Could not deliver. Try again.',409);
+   if(action==='sled-deliver'||action==='santa-task')fail('Try again.',409);
    const type=game.type==='santa'?'santa':'sled';
    return json({now,room:{code:room.code,host:room.host,seeker:null,phase:game.phase==='ended'?'ended':type,round:room.round,starts:room.starts},players:roster.map(publicPlayer),[type]:game});
   }
   if(action==='sled-sync'||action==='santa-sync')return json({retry:true});
+  if(action==='santa-task')fail('No Santa round is running.',409);
  }
  if(action==='start'){
   if(room.host!==p.id)fail('Only the room host can start.',403);if(roster.length<2)fail('At least two players are needed. Share your room code.');
